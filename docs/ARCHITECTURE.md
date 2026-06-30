@@ -198,8 +198,15 @@ Streamlit cockpit
 Explorer API использует тот же `GraphRepository`, что и strict/analytics QA. Поэтому:
 
 - при `KG_BACKEND=neo4j` cockpit читает materialized Neo4j graph;
+- при `KG_BACKEND=auto` API выбирает Neo4j, если прямой `RETURN 1` check успешен, иначе использует fallback;
 - при `KG_BACKEND=fallback` cockpit строится из SQLite catalog + accepted `ExtractionPipeline` facts;
 - invalid labels проходят через whitelist и возвращают `400`, а не произвольный Cypher.
+
+Neo4j availability is not treated as a permanent startup decision. `/health` and
+`/system/capabilities` force a short retry path, so a service that initially
+started before Neo4j can recover to `kg_backend_active=neo4j` after Neo4j becomes
+reachable. Diagnostics expose URI/user and `neo4j_password_configured`, but never
+the password value.
 
 ## Runtime presets and final hardening
 

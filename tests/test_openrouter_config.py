@@ -1,6 +1,14 @@
 from __future__ import annotations
 
+import pytest
+
 from app.llm.structured_llm import StructuredLLM
+
+
+@pytest.fixture(autouse=True)
+def _clear_llm_enabled_flags(monkeypatch):
+    monkeypatch.delenv("LLM_ENABLED", raising=False)
+    monkeypatch.delenv("ENABLE_LLM", raising=False)
 
 
 def test_openrouter_aliases_configure_provider(monkeypatch) -> None:

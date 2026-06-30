@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import hashlib
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -44,6 +46,8 @@ PRESET_TITLE_TO_ID = {
     "Строгая проверка": "strict_audit",
     "Офлайн-режим": "offline_reliable",
 }
+DEFAULT_PRESET_TITLE = "Лучший ответ"
+DEFAULT_PRESET_ID = PRESET_TITLE_TO_ID[DEFAULT_PRESET_TITLE]
 
 EXAMPLE_QUESTIONS = [
     "Что делали по сплаву ВТ6 при отжиге и какой был эффект на прочность?",
@@ -78,8 +82,16 @@ def api_patch(path: str, json_body: dict[str, Any], *, timeout: int = 30) -> dic
     return response.json()
 
 
-def ask_api(question: str, top_k: int = 12, preset_id: str = "expert_max") -> dict[str, Any]:
-    return api_post("/ask", json_body={"question": question, "top_k": top_k, "preset_id": preset_id}, timeout=90)
+def preset_id_for_title(title: str | None) -> str:
+    return PRESET_TITLE_TO_ID.get(str(title or DEFAULT_PRESET_TITLE), DEFAULT_PRESET_ID)
+
+
+def build_ask_payload(question: str, top_k: int = 12, preset_id: str = DEFAULT_PRESET_ID) -> dict[str, Any]:
+    return {"question": question, "top_k": top_k, "preset_id": preset_id}
+
+
+def ask_api(question: str, top_k: int = 12, preset_id: str = DEFAULT_PRESET_ID) -> dict[str, Any]:
+    return api_post("/ask", json_body=build_ask_payload(question, top_k=top_k, preset_id=preset_id), timeout=90)
 
 
 def _safe_get(path: str, params: dict[str, Any] | None = None, *, default: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -90,8 +102,7 @@ def _safe_get(path: str, params: dict[str, Any] | None = None, *, default: dict[
 
 
 def _selected_preset_id() -> str:
-    title = st.session_state.get("preset_title", "Лучший ответ")
-    return PRESET_TITLE_TO_ID.get(str(title), "expert_max")
+    return preset_id_for_title(st.session_state.get("preset_title", DEFAULT_PRESET_TITLE))
 
 
 def _dataframe(rows: list[dict[str, Any]], *, empty: str) -> None:
@@ -101,15 +112,143 @@ def _dataframe(rows: list[dict[str, Any]], *, empty: str) -> None:
         st.info(empty)
 
 
-def _render_interactive_graph(payload: dict[str, Any]) -> None:
-    answer_graph = build_answer_graph(payload)
-    components.html(answer_graph_to_html(answer_graph), height=560, scrolling=False)
+def _answer_graph_key(payload: dict[str, Any]) -> str:
+    identity = {
+        "question": st.session_state.get("last_question", ""),
+        "status": payload.get("status"),
+        "answer_mode": payload.get("answer_mode"),
+        "analytical_intent": payload.get("analytical_intent"),
+        "constraints": payload.get("constraints"),
+    }
+    raw = json.dumps(identity, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:10]
+
+
+def _answer_graph_modal_state_key(answer_key: str) -> str:
+    return f"answer_graph_modal_open_{answer_key}"
+
+
+def _ensure_answer_graph_modal_state(answer_key: str) -> str:
+    state_key = _answer_graph_modal_state_key(answer_key)
+    st.session_state.setdefault("answer_graph_modal_open", False)
+    st.session_state.setdefault(state_key, False)
+    return state_key
+
+
+def _open_answer_graph_modal(answer_key: str) -> None:
+    st.session_state["answer_graph_modal_open"] = True
+    st.session_state[_answer_graph_modal_state_key(answer_key)] = True
+
+
+def _close_answer_graph_modal(answer_key: str) -> None:
+    st.session_state["answer_graph_modal_open"] = False
+    st.session_state[_answer_graph_modal_state_key(answer_key)] = False
+
+
+def _render_graph_header(answer_key: str) -> None:
+    _ensure_answer_graph_modal_state(answer_key)
+    title_col, action_col = st.columns([0.58, 0.42], vertical_alignment="center")
+    with title_col:
+        st.subheader("Интерактивный связанный граф")
+    with action_col:
+        st.button(
+            "Развернуть карту",
+            key=f"open_answer_graph_modal_{answer_key}",
+            on_click=_open_answer_graph_modal,
+            args=(answer_key,),
+            use_container_width=True,
+        )
+
+
+def _render_interactive_graph(payload: dict[str, Any], answer_graph: Any, answer_key: str) -> None:
+    components.html(
+        answer_graph_to_html(answer_graph, container_id=f"answerGraphCompact_{answer_key}"),
+        height=560,
+        scrolling=False,
+    )
+    if st.session_state.get(_answer_graph_modal_state_key(answer_key)):
+        _render_large_answer_graph(answer_graph, answer_key)
     with st.expander("Технический подграф"):
         st.caption("Raw subgraph для аудита. Основная карта выше агрегирует только смысловую цепочку ответа.")
         components.html(graph_to_interactive_html(graph_to_display(payload), max_nodes=20, max_edges=30), height=420, scrolling=False)
         nodes, edges = subgraph_to_tables(graph_to_display(payload))
         _dataframe(nodes, empty="Nodes отсутствуют.")
         _dataframe(edges, empty="Edges отсутствуют.")
+
+
+def _render_answer_graph_modal_css() -> None:
+    st.markdown(
+        """
+<style>
+div[data-testid="stModal"] div[role="dialog"],
+div[data-testid="stDialog"] div[role="dialog"] {
+  width: min(85vw, 1500px) !important;
+  max-width: min(85vw, 1500px) !important;
+}
+div[data-testid="stModal"] div[role="dialog"] > div,
+div[data-testid="stDialog"] div[role="dialog"] > div {
+  max-height: 90vh;
+}
+div[data-testid="stModal"],
+div[data-testid="stDialog"] {
+  background: rgba(15, 23, 42, 0.34);
+}
+div[data-testid="stModal"] button[aria-label="Close"],
+div[data-testid="stDialog"] button[aria-label="Close"] {
+  display: none !important;
+}
+</style>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_large_answer_graph(answer_graph: Any, answer_key: str) -> None:
+    dialog = getattr(st, "dialog", None)
+    if dialog is not None:
+        try:
+            decorator = dialog("Крупная карта ответа", width="large")
+        except TypeError:
+            decorator = dialog("Крупная карта ответа")
+
+        @decorator
+        def _large_graph_dialog() -> None:
+            _render_answer_graph_modal_css()
+            _, close_col = st.columns([0.9, 0.1])
+            with close_col:
+                if st.button("×", key=f"close_answer_graph_modal_{answer_key}", help="Закрыть"):
+                    _close_answer_graph_modal(answer_key)
+                    st.rerun()
+            components.html(
+                answer_graph_to_html(
+                    answer_graph,
+                    render_height=820,
+                    render_width=1500,
+                    container_id=f"answerGraphExpanded_{answer_key}",
+                ),
+                height=860,
+                scrolling=False,
+            )
+
+        _large_graph_dialog()
+        return
+
+    with st.container(border=True):
+        close_col, _ = st.columns([0.2, 0.8])
+        with close_col:
+            if st.button("Закрыть", key=f"close_answer_graph_modal_inline_{answer_key}"):
+                _close_answer_graph_modal(answer_key)
+                st.rerun()
+        components.html(
+            answer_graph_to_html(
+                answer_graph,
+                render_height=820,
+                render_width=1500,
+                container_id=f"answerGraphExpanded_{answer_key}",
+            ),
+            height=860,
+            scrolling=False,
+        )
 
 
 def _render_answer(payload: dict[str, Any]) -> None:
@@ -161,6 +300,14 @@ def _render_details(payload: dict[str, Any]) -> None:
             st.info("Частичные совпадения отсутствуют или не требовались.")
 
     with st.expander("Диагностика"):
+        response_diagnostics = payload.get("diagnostics") or {}
+        st.json(
+            {
+                "selected_preset_from_ui": st.session_state.get("last_selected_preset_from_ui"),
+                "request_payload": st.session_state.get("last_request_payload"),
+                "response_diagnostics_preset_id": response_diagnostics.get("preset_id"),
+            }
+        )
         st.json(diagnostics_to_safe_summary(payload))
         st.json(
             {
@@ -178,14 +325,18 @@ def _run_question(question: str, preset_id: str) -> None:
     if not question.strip():
         st.warning("Введите исследовательский вопрос.")
         return
+    request_payload = build_ask_payload(question.strip(), preset_id=preset_id)
     with st.spinner("Ищу ответ в графе, evidence и активных документах..."):
         try:
-            payload = ask_api(question.strip(), preset_id=preset_id)
+            payload = api_post("/ask", json_body=request_payload, timeout=90)
         except Exception as exc:
             st.error(f"Ошибка /ask: {exc}")
             return
     st.session_state["last_question"] = question.strip()
+    st.session_state["last_request_payload"] = request_payload
+    st.session_state["last_selected_preset_from_ui"] = preset_id
     st.session_state["last_answer_payload"] = payload
+    st.session_state["answer_graph_modal_open"] = False
 
 
 def _render_document_controls() -> None:
@@ -342,8 +493,9 @@ def main() -> None:
     )
 
     _render_sidebar_diagnostics()
-    preset_title = st.radio("Режим работы", list(PRESET_TITLE_TO_ID), horizontal=True, index=0)
-    st.session_state["preset_title"] = preset_title
+    if st.session_state.get("preset_title") not in PRESET_TITLE_TO_ID:
+        st.session_state["preset_title"] = DEFAULT_PRESET_TITLE
+    st.radio("Режим работы", list(PRESET_TITLE_TO_ID), horizontal=True, key="preset_title")
     preset_id = _selected_preset_id()
 
     _render_document_controls()
@@ -358,8 +510,10 @@ def main() -> None:
     with left:
         _render_answer(payload)
     with right:
-        st.subheader("Интерактивный связанный граф")
-        _render_interactive_graph(payload)
+        answer_graph = build_answer_graph(payload)
+        answer_key = _answer_graph_key(payload)
+        _render_graph_header(answer_key)
+        _render_interactive_graph(payload, answer_graph, answer_key)
     _render_details(payload)
 
 

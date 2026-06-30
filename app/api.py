@@ -858,6 +858,7 @@ async def health():
     extraction_status = _extraction_diagnostics()
     parser_status = _parser_diagnostics()
     answer_status = _answer_synthesis_diagnostics()
+    llm_status = llm_client.status()
     return {
         "status": "ok",
         "graph": "neo4j" if active_graph is not None else "disabled",
@@ -865,12 +866,22 @@ async def health():
         **extraction_status,
         **parser_status,
         **answer_status,
+        "llm_enabled": llm_status.get("llm_enabled"),
+        "llm_provider_configured": llm_status.get("llm_provider_configured"),
+        "llm_provider_active": llm_status.get("llm_provider_active"),
+        "mistral_base_url": llm_status.get("mistral_base_url"),
+        "mistral_model": llm_status.get("mistral_model"),
+        "mistral_api_key_configured": llm_status.get("mistral_api_key_configured"),
+        "openrouter_api_key_configured": llm_status.get("openrouter_api_key_configured"),
+        "llm_ready": llm_status.get("llm_ready"),
+        "llm_last_error": llm_status.get("llm_last_error"),
+        "llm_fallback_reason": llm_status.get("fallback_reason"),
         "catalog": catalog.counts(),
         "retrieval": retrieval_engine.stats(),
         "extraction": extraction_status,
         "parser": parser_status,
         "answering": answer_status,
-        "llm": llm_client.status(),
+        "llm": llm_status,
         "qdrant_projection_enabled": _qdrant_outbox_enabled(),
         "qdrant_outbox_pending": len(outbox.pending(limit=1000)),
         # Backward-compatible alias for older smoke/eval tooling.
@@ -3142,7 +3153,18 @@ def _analytics_response(
         context.sources = _analytics_evidence_sources(evidence, limit=getattr(settings, "analytics_max_sources", 12))
 
     synthesis_mode = answer_synthesis_mode or getattr(settings, "answer_synthesis_mode", "template")
-    answer = AnswerSynthesizer(mode=synthesis_mode).synthesize(plan, context)
+    draft_answer = AnswerSynthesizer(mode=synthesis_mode).synthesize(plan, context)
+    llm_answer = None
+    if synthesis_mode in {"hybrid", "llm"}:
+        llm_answer = llm_client.synthesize_answer(
+            question=question,
+            intent=plan.intent.value,
+            answer_draft=draft_answer,
+            facts=context.facts,
+            sources=context.sources,
+            gaps=context.gaps,
+        )
+    answer = llm_answer or draft_answer
     analytics_diag = analytical_diagnostics(
         plan=plan,
         context=context,
@@ -3159,7 +3181,7 @@ def _analytics_response(
         "answer_mode": plan.answer_mode,
         "evidence_backend": evidence_search.last_backend,
     }
-    diagnostics = {**kg_diagnostics, **analytics_diag}
+    diagnostics = {**kg_diagnostics, **analytics_diag, "llm_answer_polished": bool(llm_answer)}
     return {
         "answer": answer,
         "status": status,

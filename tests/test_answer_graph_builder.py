@@ -20,9 +20,11 @@ def test_strict_positive_answer_graph_has_semantic_path() -> None:
     graph = build_answer_graph(_strict_payload())
     labels = [node.label for node in graph.nodes]
     joined = " ".join(labels)
+    joined_lower = joined.lower()
     assert "ВТ6" in joined
-    assert "отжиг" in joined
-    assert "прочность" in joined
+    assert "титановый сплав" in joined
+    assert "отжиг" in joined_lower
+    assert "прочность" in joined_lower
     assert "862–1120 MPa" in joined
     assert "источников" in joined
     assert len(graph.nodes) <= 10
@@ -39,8 +41,9 @@ def test_no_match_answer_graph_marks_gap_not_partial_answer() -> None:
     )
     labels = " ".join(node.label for node in graph.nodes)
     assert "ВТ6" in labels
-    assert "криообработка" in labels
-    assert "вязкость" in labels
+    assert "титановый сплав" in labels
+    assert "криообработка" in labels.lower()
+    assert "вязкость" in labels.lower()
     assert "точных данных нет" in labels
     assert "пробел в данных" in labels
 
@@ -59,8 +62,8 @@ def test_overview_answer_graph_is_aggregated() -> None:
         }
     )
     labels = " ".join(node.label for node in graph.nodes)
-    assert "режимы:" in labels
-    assert "свойства:" in labels
+    assert "режимы:" in labels.lower()
+    assert "свойства:" in labels.lower()
     assert len(graph.nodes) <= 10
 
 
@@ -81,9 +84,27 @@ def test_comparison_answer_graph_shows_compact_converted_ranges() -> None:
     )
     labels = " ".join(node.label for node in graph.nodes)
     assert "ВТ6" in labels
+    assert "титановый сплав" in labels
     assert "7075-T6" in labels
+    assert "алюминиевый сплав" in labels
+    assert "состояние T6" in labels
     assert "980–1120 MPa" in labels
     assert "455–531 MPa" in labels
     assert "сравнение ограничено" in labels
     assert len(graph.nodes) <= 10
     assert len(graph.edges) <= 12
+
+
+def test_unknown_material_gets_neutral_enrichment_without_hallucination() -> None:
+    graph = build_answer_graph(
+        {
+            "status": "ok",
+            "constraints": {"materials": ["Материал-X"], "regimes": ["режим-X"], "properties": ["свойство-X"]},
+            "facts": [{"material": "Материал-X", "regime": "режим-X", "property": "свойство-X"}],
+        }
+    )
+    labels = " ".join(node.label for node in graph.nodes)
+    assert "Материал-X" in labels
+    assert "материал из корпуса" in labels
+    assert "титановый сплав" not in labels
+    assert "алюминиевый сплав" not in labels

@@ -91,6 +91,8 @@ def build_human_answer(payload: dict[str, Any], preset_id: RuntimePresetId | str
         answer = _technical_object_answer(payload)
     elif payload.get("status") == "no_exact_match":
         answer = _negative_answer(payload)
+    elif _has_grounded_llm_answer(payload):
+        answer = _grounded_llm_answer(payload)
     elif _is_comparison(payload):
         answer = _comparison_answer(payload)
     elif _is_gap_answer(payload):
@@ -112,6 +114,35 @@ def build_human_answer(payload: dict[str, Any], preset_id: RuntimePresetId | str
         )
         answer.title = "Офлайн-режим: " + answer.title
     return answer
+
+
+def _has_grounded_llm_answer(payload: dict[str, Any]) -> bool:
+    diagnostics = payload.get("diagnostics") or {}
+    answer_mode = str(payload.get("answer_mode") or "")
+    return bool(
+        payload.get("technical_answer")
+        and (
+            diagnostics.get("llm_answer_polished")
+            or answer_mode.startswith("llm_grounded")
+        )
+    )
+
+
+def _grounded_llm_answer(payload: dict[str, Any]) -> HumanAnswer:
+    if _is_comparison(payload):
+        base = _comparison_answer(payload)
+    elif _is_gap_answer(payload):
+        base = _gap_answer(payload)
+    elif _is_history_answer(payload):
+        base = _history_answer(payload)
+    elif _is_similar_answer(payload):
+        base = _similar_answer(payload)
+    elif _is_overview_answer(payload):
+        base = _overview_answer(payload)
+    else:
+        base = _strict_positive_or_generic_answer(payload)
+    base.summary = _sanitize_main_answer(str(payload.get("technical_answer") or base.summary).strip())
+    return base
 
 
 def render_human_answer_markdown(answer: HumanAnswer) -> str:

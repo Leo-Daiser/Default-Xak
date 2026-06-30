@@ -14,6 +14,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from ..domain.unit_normalization import normalize_strength_to_mpa
+from .answer_graph_labels import enrich_answer_graph_labels
 
 
 FORBIDDEN_LABEL_RE = re.compile(
@@ -102,15 +103,21 @@ def build_answer_graph(payload: dict[str, Any]) -> AnswerGraph:
     """Build a compact semantic answer graph from an /ask response payload."""
 
     if payload.get("status") == "no_exact_match":
-        return _build_no_match_graph(payload)
+        return enrich_answer_graph_labels(_build_no_match_graph(payload), payload)
     if _is_comparison(payload):
-        return _build_comparison_graph(payload)
+        return enrich_answer_graph_labels(_build_comparison_graph(payload), payload)
     if _is_overview(payload):
-        return _build_overview_graph(payload)
-    return _build_strict_or_generic_graph(payload)
+        return enrich_answer_graph_labels(_build_overview_graph(payload), payload)
+    return enrich_answer_graph_labels(_build_strict_or_generic_graph(payload), payload)
 
 
-def answer_graph_to_html(graph: AnswerGraph) -> str:
+def answer_graph_to_html(
+    graph: AnswerGraph,
+    *,
+    render_height: int | None = None,
+    render_width: int | None = None,
+    container_id: str = "answerGraph",
+) -> str:
     """Render AnswerGraph as layered interactive SVG HTML."""
 
     if not graph.nodes:
@@ -118,7 +125,12 @@ def answer_graph_to_html(graph: AnswerGraph) -> str:
     nodes = graph.nodes[:10]
     allowed = {node.id for node in nodes}
     edges = [edge for edge in graph.edges if edge.source in allowed and edge.target in allowed][:12]
-    width, height = 940, max(420, 110 + 86 * max(_max_level_count(nodes), 1))
+    node_width, node_height = 176, 78
+    height = render_height or max(420, 130 + 98 * max(_max_level_count(nodes), 1))
+    width = render_width or (1500 if height >= 700 else 940)
+    svg_id = f"{container_id}Svg"
+    viewport_id = f"{container_id}Viewport"
+    arrow_id = f"{container_id}Arrow"
     positions = _layer_positions(nodes, width, height)
     edge_lines = []
     for edge in edges:
@@ -127,9 +139,9 @@ def answer_graph_to_html(graph: AnswerGraph) -> str:
         if not source or not target:
             continue
         edge_lines.append(
-            f"<path class='ag-edge' d='M {source['x'] + 78:.1f} {source['y']:.1f} C "
+            f"<path class='ag-edge' d='M {source['x'] + node_width / 2:.1f} {source['y']:.1f} C "
             f"{source['x'] + 126:.1f} {source['y']:.1f}, {target['x'] - 126:.1f} {target['y']:.1f}, "
-            f"{target['x'] - 78:.1f} {target['y']:.1f}' />"
+            f"{target['x'] - node_width / 2:.1f} {target['y']:.1f}' />"
         )
         if edge.label:
             edge_lines.append(
@@ -139,7 +151,8 @@ def answer_graph_to_html(graph: AnswerGraph) -> str:
     node_items = []
     for idx, node in enumerate(nodes):
         pos = positions[node.id]
-        label_lines = _wrap_label(node.label, 17)[:2]
+        label_lines = _label_lines(node.label, 20)[:3]
+        start_y = -14 if len(label_lines) == 3 else -7 if len(label_lines) == 2 else 0
         text_spans = "".join(
             f"<tspan x='0' dy='{0 if line_idx == 0 else 16}'>{html.escape(line)}</tspan>"
             for line_idx, line in enumerate(label_lines)
@@ -147,28 +160,29 @@ def answer_graph_to_html(graph: AnswerGraph) -> str:
         tooltip = html.escape(node.tooltip or node.label)
         node_items.append(
             f"<g class='ag-node' data-node-id='node-{idx}' transform='translate({pos['x']:.1f},{pos['y']:.1f})'>"
-            f"<title>{tooltip}</title><rect x='-78' y='-30' width='156' height='60' rx='10' class='ag-{node.type}' />"
-            f"<text text-anchor='middle' y='-5'>{text_spans}</text></g>"
+            f"<title>{tooltip}</title><rect x='-{node_width / 2:.0f}' y='-{node_height / 2:.0f}' "
+            f"width='{node_width}' height='{node_height}' rx='10' class='ag-{node.type}' data-fixed='true' />"
+            f"<text text-anchor='middle' y='{start_y}'>{text_spans}</text></g>"
         )
     return f"""
 <div class="answer-graph-wrap">
   <div class="answer-graph-title">{html.escape(graph.title)}</div>
-  <div class="answer-graph-help">Wheel: zoom · drag background: pan · drag node: move</div>
-  <svg id="answerGraphSvg" viewBox="0 0 {width} {height}" width="100%" height="{height}" role="img">
-    <defs><marker id="answerArrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#64748b"></path></marker></defs>
-    <g id="answerGraphViewport">{"".join(edge_lines)}{"".join(node_items)}</g>
+  <div class="answer-graph-help">Колесо — масштаб · фон — перемещение карты · узлы зафиксированы</div>
+  <svg id="{svg_id}" viewBox="0 0 {width} {height}" width="100%" height="{height}" role="img">
+    <defs><marker id="{arrow_id}" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#64748b"></path></marker></defs>
+    <g id="{viewport_id}">{"".join(edge_lines)}{"".join(node_items)}</g>
   </svg>
 </div>
 <style>
 .answer-graph-wrap {{ border:1px solid #d8dee9; border-radius:10px; background:#fff; position:relative; overflow:hidden; }}
 .answer-graph-title {{ position:absolute; left:12px; top:8px; z-index:2; font:600 13px Arial; color:#334155; background:rgba(255,255,255,.9); padding:2px 6px; border-radius:4px; }}
 .answer-graph-help {{ position:absolute; right:10px; top:8px; z-index:2; font:12px Arial; color:#64748b; background:rgba(255,255,255,.86); padding:2px 6px; border-radius:4px; }}
-#answerGraphSvg {{ cursor:grab; touch-action:none; }}
-.ag-edge {{ fill:none; stroke:#64748b; stroke-width:1.5; marker-end:url(#answerArrow); opacity:.72; }}
+#{svg_id} {{ cursor:grab; touch-action:none; }}
+.ag-edge {{ fill:none; stroke:#64748b; stroke-width:1.5; marker-end:url(#{arrow_id}); opacity:.72; }}
 .ag-edge-label {{ fill:#475569; font:10px Arial; paint-order:stroke; stroke:#fff; stroke-width:3px; }}
 .ag-node rect {{ stroke:#334155; stroke-width:1.1; filter: drop-shadow(0 2px 4px rgba(15,23,42,.14)); }}
 .ag-node text {{ fill:#0f172a; font:12px Arial; pointer-events:none; }}
-.ag-node {{ cursor:move; }}
+.ag-node {{ cursor:default; }}
 .ag-material {{ fill:#bfdbfe; }}
 .ag-regime {{ fill:#bbf7d0; }}
 .ag-property {{ fill:#fde68a; }}
@@ -179,12 +193,18 @@ def answer_graph_to_html(graph: AnswerGraph) -> str:
 </style>
 <script>
 (function() {{
- const graphOptions = {{ layout: {{ hierarchical: {{ enabled: true, direction: "LR" }} }}, physics: {{ enabled: false }}, interaction: {{ zoomView: true, dragView: true, dragNodes: true }} }};
- const svg = document.getElementById('answerGraphSvg');
- const viewport = document.getElementById('answerGraphViewport');
+ const graphOptions = {{ layout: {{ hierarchical: {{ enabled: true, direction: "LR" }} }}, physics: {{ enabled: false }}, interaction: {{ zoomView: true, dragView: true, dragNodes: false }} }};
+ const svg = document.getElementById('{svg_id}');
+ const viewport = document.getElementById('{viewport_id}');
  let state = {{x:0, y:0, scale:1}};
  let drag = null;
  function apply() {{ viewport.setAttribute('transform', `translate(${{state.x}},${{state.y}}) scale(${{state.scale}})`); }}
+ function isNodeHit(ev) {{
+   return Array.from(document.querySelectorAll('.ag-node')).some(function(node) {{
+     const box = node.getBoundingClientRect();
+     return ev.clientX >= box.left && ev.clientX <= box.right && ev.clientY >= box.top && ev.clientY <= box.bottom;
+   }});
+ }}
  svg.addEventListener('wheel', function(ev) {{
    ev.preventDefault();
    const delta = ev.deltaY < 0 ? 1.12 : 0.89;
@@ -193,19 +213,13 @@ def answer_graph_to_html(graph: AnswerGraph) -> str:
  }}, {{passive:false}});
  svg.addEventListener('pointerdown', function(ev) {{
    const node = ev.target.closest && ev.target.closest('.ag-node');
-   drag = {{kind: node ? 'node' : 'pan', node: node, startX: ev.clientX, startY: ev.clientY, x: state.x, y: state.y}};
+   drag = (node || isNodeHit(ev)) ? null : {{kind: 'pan', startX: ev.clientX, startY: ev.clientY, x: state.x, y: state.y}};
    svg.setPointerCapture(ev.pointerId);
  }});
  svg.addEventListener('pointermove', function(ev) {{
    if (!drag) return;
    const dx = ev.clientX - drag.startX, dy = ev.clientY - drag.startY;
-   if (drag.kind === 'pan') {{ state.x = drag.x + dx; state.y = drag.y + dy; apply(); }}
-   else {{
-     const current = drag.node.getAttribute('transform').match(/translate\\(([-0-9.]+),([-0-9.]+)\\)/);
-     const baseX = parseFloat(current[1]), baseY = parseFloat(current[2]);
-     drag.node.setAttribute('transform', `translate(${{baseX + dx / state.scale}},${{baseY + dy / state.scale}})`);
-     drag.startX = ev.clientX; drag.startY = ev.clientY;
-   }}
+   state.x = drag.x + dx; state.y = drag.y + dy; apply();
  }});
  svg.addEventListener('pointerup', function(ev) {{ drag = null; try {{ svg.releasePointerCapture(ev.pointerId); }} catch(e) {{}} }});
  apply();
@@ -459,9 +473,15 @@ def _join_short(values: list[str]) -> str:
     return text + (f" +{len(values) - 4}" if len(values) > 4 else "")
 
 
+def _label_lines(label: str, width: int) -> list[str]:
+    result: list[str] = []
+    for raw_line in str(label).replace("\\n", "\n").splitlines():
+        result.extend(_wrap_label(raw_line, width))
+    return result or _wrap_label(str(label), width)
+
+
 def _wrap_label(label: str, width: int) -> list[str]:
-    label = label.replace("\n", " ")
-    words = label.split()
+    words = str(label).replace("\n", " ").split()
     lines: list[str] = []
     current = ""
     for word in words:

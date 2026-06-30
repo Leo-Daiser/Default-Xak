@@ -15,6 +15,33 @@ def test_ask_material_overview_returns_analytical_fields(tmp_path) -> None:
     assert payload["diagnostics"]["answer_synthesis_mode"]
 
 
+def test_expert_max_analytics_path_uses_llm_polish_when_ready(tmp_path, monkeypatch) -> None:
+    client = seeded_client(tmp_path)
+    import app.api as api
+
+    class FakeLLM:
+        def status(self):
+            return {"ready": True, "provider": "mistral", "last_error": ""}
+
+        def synthesize_answer(self, **kwargs):
+            assert kwargs["facts"]
+            return "LLM polished comparison answer"
+
+    monkeypatch.setattr(api, "llm_client", FakeLLM())
+
+    response = client.post(
+        "/ask",
+        json={"question": "Сравни ВТ6 и 7075-T6 по прочности.", "top_k": 12, "preset_id": "expert_max"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["diagnostics"]["preset_id"] == "expert_max"
+    assert payload["diagnostics"]["effective_runtime_mode"]["answer_synthesis_mode"] == "hybrid"
+    assert payload["diagnostics"]["llm_answer_polished"] is True
+    assert "LLM polished comparison answer" in payload["answer"]
+
+
 def test_ask_graph_neighborhood_returns_subgraph_stats(tmp_path) -> None:
     client = seeded_client(tmp_path)
     response = client.post("/ask", params={"question": "Покажи связанные сущности по ВТ6", "top_k": 6})

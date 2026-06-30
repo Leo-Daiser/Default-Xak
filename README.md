@@ -44,20 +44,24 @@ cd Default-Xak
 dir .env
 ```
 
-Внутри должны быть настройки Neo4j и OpenRouter:
+Внутри должны быть настройки Neo4j и выбранного LLM provider. Для Mistral ключ
+вставляется только в локальный `.env`, не в `.env.example` и не в код:
 
 ```env
 KG_BACKEND=auto
 NEO4J_URI=bolt://neo4j:7687
 NEO4J_USER=neo4j
-NEO4J_PASSWORD=password
+NEO4J_PASSWORD=<neo4j-password>
 NEO4J_DATABASE=neo4j
 
 LLM_ENABLED=true
-LLM_PROVIDER=openrouter
-LLM_BASE_URL=https://openrouter.ai/api/v1
-LLM_API_KEY=...
-LLM_MODEL=openrouter/free
+LLM_PROVIDER=mistral
+MISTRAL_API_KEY=...
+MISTRAL_MODEL=mistral-small-latest
+
+# optional fallback
+OPENROUTER_API_KEY=
+OPENROUTER_MODEL=openrouter/free
 ```
 
 ---
@@ -96,7 +100,7 @@ Neo4j login:
 
 ```text
 user: neo4j
-password: password
+password: значение NEO4J_PASSWORD из вашего .env
 ```
 
 ---
@@ -124,6 +128,20 @@ qdrant
 curl http://localhost:8000/health
 ```
 
+Для Docker-демо с доступным Neo4j ожидаются поля:
+
+```json
+{
+  "kg_backend_configured": "auto",
+  "kg_backend_active": "neo4j",
+  "neo4j_available": true,
+  "neo4j_error": "",
+  "kg_backend_decision": {
+    "selected": "neo4j"
+  }
+}
+```
+
 Проверить подключение к Neo4j из API-контейнера:
 
 ```powershell
@@ -132,8 +150,11 @@ docker compose exec api python scripts/check_neo4j_connection.py
 
 Ожидаемый результат:
 
-```text
-RESULT: 1
+```json
+{
+  "available": true,
+  "reason": "Neo4j connection check succeeded with RETURN 1"
+}
 ```
 
 ---
@@ -316,7 +337,7 @@ docker compose logs api --tail=100
 ```env
 NEO4J_URI=bolt://neo4j:7687
 NEO4J_USER=neo4j
-NEO4J_PASSWORD=password
+NEO4J_PASSWORD=<neo4j-password>
 NEO4J_DATABASE=neo4j
 ```
 
@@ -324,6 +345,52 @@ NEO4J_DATABASE=neo4j
 
 ```powershell
 docker compose exec api python scripts/check_neo4j_connection.py
+```
+
+Если `KG_BACKEND=auto`, `/health` делает принудительную короткую повторную проверку Neo4j. Поэтому после старта Neo4j поле `kg_backend_active` должно перейти в `neo4j`, если прямой `RETURN 1` из API-контейнера успешен. Пароль в `/health` не выводится; проверяется только `neo4j_password_configured`.
+
+### Как подключить Mistral
+
+1. Создай API key в Mistral Studio / La Plateforme.
+2. Скопируй ключ в локальный `.env`. Не вставляй ключ в `.env.example`, README или код.
+3. Укажи provider и модель:
+
+```env
+LLM_ENABLED=true
+LLM_PROVIDER=mistral
+MISTRAL_API_KEY=...
+MISTRAL_BASE_URL=https://api.mistral.ai/v1
+MISTRAL_MODEL=mistral-small-latest
+MISTRAL_TIMEOUT_SECONDS=60
+MISTRAL_MAX_TOKENS=1200
+MISTRAL_TEMPERATURE=0.2
+```
+
+Модель можно поменять на доступную в твоём аккаунте. Проверь список доступных
+моделей и лимиты в Mistral Studio / API Limits.
+
+Перезапусти контейнеры:
+
+```powershell
+docker compose down
+docker compose --profile full up -d --build
+```
+
+Проверь подключение:
+
+```powershell
+docker compose exec api python scripts/check_mistral_connection.py
+curl http://localhost:8000/health
+```
+
+В `/health` должны быть безопасные поля без секретов:
+
+```json
+"llm_provider_configured": "mistral",
+"llm_provider_active": "mistral",
+"mistral_model": "mistral-small-latest",
+"mistral_api_key_configured": true,
+"llm_ready": true
 ```
 
 ### OpenRouter / LLM не работает
@@ -350,6 +417,10 @@ curl http://localhost:8000/health
 "provider": "openrouter",
 "ready": true
 ```
+
+При `LLM_PROVIDER=auto` приложение выбирает Mistral, если задан
+`MISTRAL_API_KEY`, иначе OpenRouter при наличии `OPENROUTER_API_KEY`, иначе
+использует offline/template fallback.
 
 ---
 

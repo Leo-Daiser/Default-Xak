@@ -539,10 +539,26 @@ $env:KG_BACKEND="neo4j"     # require Neo4j; no silent fallback
 $env:KG_BACKEND="fallback"  # force local fallback
 ```
 
+In `auto` mode the API retries Neo4j from `/health` and `/system/capabilities`.
+If a direct `RETURN 1` check succeeds, `kg_backend_active` must become `neo4j`;
+startup-time connection refusals must not permanently pin the service to fallback.
+
 Start Neo4j:
 
 ```powershell
 docker compose --profile full up -d neo4j
+```
+
+Check direct connectivity:
+
+```powershell
+python scripts\check_neo4j_connection.py
+```
+
+Inside the Docker API container use the project path under `/code`:
+
+```powershell
+docker compose exec api python scripts/check_neo4j_connection.py
 ```
 
 Apply schema:
@@ -575,9 +591,18 @@ Expected fields:
 {
   "kg_backend_configured": "auto",
   "kg_backend_active": "neo4j",
-  "neo4j_available": true
+  "neo4j_available": true,
+  "neo4j_error": "",
+  "neo4j_password_configured": true,
+  "kg_backend_decision": {
+    "selected": "neo4j"
+  }
 }
 ```
+
+Do not copy password values from local `.env`, `docker compose config`, terminal logs
+or screenshots into docs/chats. Health diagnostics intentionally expose only
+`neo4j_password_configured`.
 
 ### Optional grounded LLM synthesis
 
@@ -610,6 +635,25 @@ The API layer also supports OpenAI-compatible cloud providers for temporary demo
 The LLM is used only for query rewriting and grounded answer polishing: extracted
 facts and sources remain the source of truth.
 
+Mistral Studio / La Plateforme example:
+
+```powershell
+$env:LLM_ENABLED="true"
+$env:LLM_PROVIDER="mistral"
+$env:MISTRAL_API_KEY="..."
+$env:MISTRAL_BASE_URL="https://api.mistral.ai/v1"
+$env:MISTRAL_MODEL="mistral-small-latest"
+$env:MISTRAL_TIMEOUT_SECONDS="60"
+$env:MISTRAL_MAX_TOKENS="1200"
+$env:MISTRAL_TEMPERATURE="0.2"
+uvicorn app.api:app --reload --port 8000
+```
+
+Put the real Mistral key only into a local `.env` or local shell environment.
+Do not write it into `.env.example`, README, committed docs, or source code.
+If `mistral-small-latest` is unavailable for the account, choose an allowed
+model in Mistral Studio / API Limits and set `MISTRAL_MODEL`.
+
 OpenRouter example:
 
 ```powershell
@@ -633,6 +677,16 @@ uvicorn app.api:app --reload --port 8000
 If `OPENROUTER_API_KEY` is set but no model is configured, `/health` reports
 `OpenRouter API key found, but model is not configured` / `LLM_MODEL is missing`
 instead of silently showing `provider=none`.
+
+Provider auto-selection:
+
+- `LLM_PROVIDER=mistral`: use Mistral; if the request fails and OpenRouter is
+  configured, answer synthesis may fall back to OpenRouter, then to the
+  deterministic template path.
+- `LLM_PROVIDER=openrouter`: keep the OpenRouter path.
+- `LLM_PROVIDER=auto`: use Mistral when `MISTRAL_API_KEY` exists, otherwise
+  OpenRouter when `OPENROUTER_API_KEY` exists, otherwise offline/template.
+- `LLM_PROVIDER=offline` or `LLM_ENABLED=false`: use offline/template.
 
 Groq example:
 

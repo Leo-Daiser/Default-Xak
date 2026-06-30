@@ -244,7 +244,7 @@ def clean_graph_label(node: dict[str, Any]) -> str:
 
 
 def graph_to_interactive_html(subgraph: dict[str, Any] | None, *, max_nodes: int = 20, max_edges: int = 30) -> str:
-    """Build self-contained interactive SVG graph HTML with zoom/pan/drag."""
+    """Build self-contained interactive SVG graph HTML with zoom/pan and fixed nodes."""
 
     nodes, edges = subgraph_to_tables(subgraph)
     nodes = nodes[:max_nodes]
@@ -289,7 +289,7 @@ def graph_to_interactive_html(subgraph: dict[str, Any] | None, *, max_nodes: int
         )
     return f"""
 <div class="kg-graph-wrap">
-  <div class="kg-graph-help">Wheel: zoom · drag background: pan · drag node: move</div>
+  <div class="kg-graph-help">Колесо — масштаб · фон — перемещение карты · узлы зафиксированы</div>
   <svg id="kgGraphSvg" viewBox="0 0 {width} {height}" width="100%" height="{height}" role="img">
     <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#64748b"></path></marker></defs>
     <g id="kgViewport">{"".join(edge_lines)}{"".join(node_items)}</g>
@@ -303,7 +303,7 @@ def graph_to_interactive_html(subgraph: dict[str, Any] | None, *, max_nodes: int
 .edge-label {{ fill:#475569; font:10px Arial; paint-order:stroke; stroke:#fff; stroke-width:3px; stroke-linejoin:round; }}
 .node circle {{ stroke:#334155; stroke-width:1.2; filter: drop-shadow(0 2px 3px rgba(15,23,42,.18)); }}
 .node text {{ fill:#0f172a; font:12px Arial; pointer-events:none; }}
-.node {{ cursor:move; }}
+.node {{ cursor:default; }}
 </style>
 <script>
 (function() {{
@@ -312,6 +312,12 @@ def graph_to_interactive_html(subgraph: dict[str, Any] | None, *, max_nodes: int
  let state = {{x:0, y:0, scale:1}};
  let drag = null;
  function apply() {{ viewport.setAttribute('transform', `translate(${{state.x}},${{state.y}}) scale(${{state.scale}})`); }}
+ function isNodeHit(ev) {{
+   return Array.from(document.querySelectorAll('.node')).some(function(node) {{
+     const box = node.getBoundingClientRect();
+     return ev.clientX >= box.left && ev.clientX <= box.right && ev.clientY >= box.top && ev.clientY <= box.bottom;
+   }});
+ }}
  svg.addEventListener('wheel', function(ev) {{
    ev.preventDefault();
    const delta = ev.deltaY < 0 ? 1.12 : 0.89;
@@ -320,19 +326,13 @@ def graph_to_interactive_html(subgraph: dict[str, Any] | None, *, max_nodes: int
  }}, {{passive:false}});
  svg.addEventListener('pointerdown', function(ev) {{
    const node = ev.target.closest && ev.target.closest('.node');
-   drag = {{kind: node ? 'node' : 'pan', node: node, startX: ev.clientX, startY: ev.clientY, x: state.x, y: state.y}};
+   drag = (node || isNodeHit(ev)) ? null : {{kind: 'pan', startX: ev.clientX, startY: ev.clientY, x: state.x, y: state.y}};
    svg.setPointerCapture(ev.pointerId);
  }});
  svg.addEventListener('pointermove', function(ev) {{
    if (!drag) return;
    const dx = ev.clientX - drag.startX, dy = ev.clientY - drag.startY;
-   if (drag.kind === 'pan') {{ state.x = drag.x + dx; state.y = drag.y + dy; apply(); }}
-   else {{
-     const current = drag.node.getAttribute('transform').match(/translate\\(([-0-9.]+),([-0-9.]+)\\)/);
-     const baseX = parseFloat(current[1]), baseY = parseFloat(current[2]);
-     drag.node.setAttribute('transform', `translate(${{baseX + dx / state.scale}},${{baseY + dy / state.scale}})`);
-     drag.startX = ev.clientX; drag.startY = ev.clientY;
-   }}
+   state.x = drag.x + dx; state.y = drag.y + dy; apply();
  }});
  svg.addEventListener('pointerup', function(ev) {{ drag = null; try {{ svg.releasePointerCapture(ev.pointerId); }} catch(e) {{}} }});
  apply();
