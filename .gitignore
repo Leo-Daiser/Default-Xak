@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.env
+/data/
+/data/extraction_audit/
+/data/parser_audit/
+/volumes/
+/dist/
+*.log
+*.sqlite3
+.DS_Store
+
+*.zip
+
+.env

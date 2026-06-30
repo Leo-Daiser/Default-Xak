@@ -1,0 +1,5 @@
+object,part,article_number,material,standard,parameter,requirement,image
+насос NPK-200,корпус,ART-NPK-200-BODY,09Г2С,ISO 9001,P=10 MPa,Требование: корпус насоса должен выдерживать давление 10 MPa,images/pump_body.png
+насос NPK-200,рабочее колесо,ART-NPK-200-IMP,AISI 304,ISO 9001,Ø25 мм,Требование: рабочее колесо должно быть сбалансировано перед монтажом,images/pump_impeller.png
+насос NPK-200,уплотнение,SEAL-45X60,AISI 321,ISO 9001,45x60 mm,Требование: уплотнение должно заменяться при каждом капитальном ремонте,images/pump_seal.png
+клапан DN50,корпус,VALVE-DN50-PN16,12Х18Н10Т,ГОСТ 33259,PN16,Требование: корпус клапана должен соответствовать ГОСТ 33259,images/valve_dn50_scheme.png

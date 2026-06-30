@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+/data/
+/data/extraction_audit/
+/data/parser_audit/
+/volumes/
+/dist/
+*.log
+*.sqlite3
+.git/
+.DS_Store

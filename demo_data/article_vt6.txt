@@ -1,0 +1,19 @@
+Title: Термообработка сплава ВТ6 и влияние на механические свойства.
+
+Experiment: VT6-AN-TXT
+Material: сплав ВТ6.
+Process: отжиг at 750 C for 2 h.
+Equipment: Вакуумная печь SNOL-75.
+Laboratory: Лаборатория легких сплавов.
+Property: прочность.
+Result: прочность decreased to 980 MPa after annealing, while пластичность increased to 14 %.
+Conclusion: отжиг ВТ6 снижает прочность, но улучшает пластичность; режим полезен для снятия внутренних напряжений.
+
+Experiment: VT6-EQ-TXT
+Material: VT6.
+Process: старение at 550 C for 4 h.
+Equipment: Твердомер Wilson VH330.
+Laboratory: Лаборатория легких сплавов.
+Property: твёрдость.
+Result: hardness increased to 360 HV.
+Conclusion: старение VT6 повышает твёрдость по сравнению с состоянием после отжига.
