@@ -85,7 +85,7 @@ def _retrieval_backend_name(engine: RetrievalEngine) -> str:
         return "hybrid_qdrant"
     if stats.get("local_embeddings_ready"):
         return "hybrid_local_embeddings"
-    return str(stats.get("retrieval_mode") or "bm25")
+    return str(stats.get("effective_retrieval_mode") or stats.get("retrieval_mode") or "bm25")
 
 
 def _chunk_to_evidence(chunk: Chunk, score: float, backend: str) -> EvidenceItem:

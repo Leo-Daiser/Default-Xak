@@ -422,6 +422,55 @@ curl http://localhost:8000/health
 `MISTRAL_API_KEY`, иначе OpenRouter при наличии `OPENROUTER_API_KEY`, иначе
 использует offline/template fallback.
 
+### Как включить local hybrid embeddings
+
+Phase 1 embeddings не заменяют Neo4j и не создают факты. Они только расширяют
+candidate retrieval: BM25 остаётся включённым, dense retrieval добавляет
+семантически похожие chunks, а затем graph/extraction/constraints проверяют
+структурированные факты.
+
+Для Docker нужно явно установить optional dependency:
+
+```env
+EXTRA_REQUIREMENTS=requirements-embeddings.txt
+RETRIEVAL_MODE=hybrid
+ENABLE_LOCAL_EMBEDDINGS=true
+EAGER_LOCAL_EMBEDDINGS=false
+DIRECT_QDRANT_PROJECTION=false
+EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+```
+
+Перезапуск:
+
+```powershell
+docker compose down
+docker compose --profile full up -d --build
+```
+
+Проверка:
+
+```powershell
+curl http://localhost:8000/health
+python evaluation/eval_semantic_retrieval.py
+```
+
+В `/health.retrieval` смотри:
+
+```json
+"retrieval_mode": "hybrid",
+"bm25_ready": true,
+"embedding_dependency_available": true,
+"local_embeddings_enabled": true,
+"local_embeddings_ready": true,
+"hybrid_dense_enabled": true,
+"hybrid_degraded_reason": ""
+```
+
+Если `sentence-transformers` или модель недоступны, приложение не падает:
+`effective_retrieval_mode` станет `hybrid_degraded_to_bm25`, а причина будет в
+`hybrid_degraded_reason`. Qdrant для Phase 1 не нужен; `DIRECT_QDRANT_PROJECTION`
+оставь `false`.
+
 ---
 
 ## Что не нужно коммитить

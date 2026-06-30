@@ -129,8 +129,10 @@ class RetrievalEngine:
         self._qdrant_ready = False
         self._local_embeddings: Dict[str, List[float]] = {}
         self._local_embeddings_ready = False
+        self._local_embedding_index_status = "not_started"
         self._last_embedding_error = ""
         self._last_qdrant_error = ""
+        self._last_dense_candidates = 0
 
     @property
     def chunks(self) -> List[Chunk]:
@@ -139,14 +141,14 @@ class RetrievalEngine:
     def _ensure_embeddings(self) -> bool:
         """Load embedding model if available. Return False on missing deps."""
         if SentenceTransformer is None:
-            self._last_embedding_error = "sentence_transformers_not_installed"
+            self._last_embedding_error = "dependency missing: sentence-transformers is not installed"
             return False
         if self._embedding_model is None:
             try:
                 self._embedding_model = SentenceTransformer(settings.embedding_model)
-            except Exception:
+            except Exception as exc:
                 self._embedding_model = None
-                self._last_embedding_error = f"embedding_model_load_failed:{settings.embedding_model}"
+                self._last_embedding_error = f"model load failed: {settings.embedding_model}: {type(exc).__name__}"
                 return False
         self._last_embedding_error = ""
         return True
@@ -235,39 +237,56 @@ class RetrievalEngine:
         installed or the model is not cached, retrieval silently falls back to
         BM25.
         """
-        if not chunks or not getattr(settings, "enable_local_embeddings", False):
+        if not getattr(settings, "enable_local_embeddings", False):
+            self._local_embedding_index_status = "disabled"
+            self._last_embedding_error = "disabled by config"
+            return False
+        if not chunks:
+            self._local_embedding_index_status = "empty_corpus"
             return False
         if not self._ensure_embeddings():
+            self._local_embedding_index_status = "failed"
             return False
         try:
+            self._local_embedding_index_status = "building"
             texts = [chunk.text for chunk in chunks]
             vectors = self._embedding_model.encode(texts, batch_size=32, convert_to_numpy=True, normalize_embeddings=True)
             if len(vectors) == 0:
+                self._local_embedding_index_status = "failed"
+                self._last_embedding_error = "indexing failed: embedding model returned no vectors"
                 return False
             for chunk, vector in zip(chunks, vectors):
                 self._local_embeddings[chunk.chunk_id] = self._to_vector_list(vector)
             self._local_embeddings_ready = bool(self._local_embeddings)
+            self._local_embedding_index_status = "ready" if self._local_embeddings_ready else "failed"
             return self._local_embeddings_ready
-        except Exception:
+        except Exception as exc:
             self._local_embeddings_ready = False
-            self._last_embedding_error = "local_embedding_projection_failed"
+            self._local_embedding_index_status = "failed"
+            self._last_embedding_error = f"indexing failed: {type(exc).__name__}"
             return False
 
     def local_dense_retrieve(self, query: str, top_k: int = 20) -> List[Tuple[str, float]]:
         if not getattr(settings, "enable_local_embeddings", False):
+            self._last_dense_candidates = 0
+            self._last_embedding_error = "disabled by config"
             return []
         if not self._local_embeddings and self._chunks:
             self.project_chunks_to_local_embeddings(self._chunks)
         if not self._local_embeddings or not self._ensure_embeddings():
+            self._last_dense_candidates = 0
             return []
         try:
             q_vector = self._embedding_model.encode([query], convert_to_numpy=True, normalize_embeddings=True)[0]
             q_list = self._to_vector_list(q_vector)
             scored = [(chunk_id, self._cosine(q_list, vector)) for chunk_id, vector in self._local_embeddings.items()]
             scored.sort(key=lambda item: item[1], reverse=True)
-            return scored[:top_k]
-        except Exception:
-            self._last_embedding_error = "local_dense_query_failed"
+            result = scored[:top_k]
+            self._last_dense_candidates = len(result)
+            return result
+        except Exception as exc:
+            self._last_dense_candidates = 0
+            self._last_embedding_error = f"dense query failed: {type(exc).__name__}"
             return []
 
     def project_chunks_to_qdrant(self, chunks: List[Chunk]) -> bool:
@@ -319,6 +338,7 @@ class RetrievalEngine:
             self._chunks = [chunk for chunk in self._chunks if chunk.doc_id != replace_doc_id]
             for chunk_id in removed_ids:
                 self._local_embeddings.pop(chunk_id, None)
+            self._local_embeddings_ready = bool(self._local_embeddings)
         self._chunks.extend(chunks)
         self._bm25 = SimpleBM25([chunk.text for chunk in self._chunks])
 
@@ -338,6 +358,12 @@ class RetrievalEngine:
         return idx_scores[:top_k]
 
     def dense_retrieve(self, query: str, top_k: int = 20) -> List[Tuple[str, float]]:
+        if getattr(settings, "enable_local_embeddings", False):
+            return self.local_dense_retrieve(query, top_k=top_k)
+        self._last_dense_candidates = 0
+        self._last_embedding_error = "disabled by config"
+        if not getattr(settings, "direct_qdrant_projection", False):
+            return []
         if not self._ensure_qdrant():
             return self.local_dense_retrieve(query, top_k=top_k)
         try:
@@ -358,27 +384,64 @@ class RetrievalEngine:
                     limit=top_k,
                 )
                 hits = getattr(result, "points", result)
-            return [(hit.payload["chunk_id"], float(hit.score)) for hit in hits if hit.payload]
-        except Exception:
+            result = [(hit.payload["chunk_id"], float(hit.score)) for hit in hits if hit.payload]
+            self._last_dense_candidates = len(result)
+            return result
+        except Exception as exc:
+            self._last_dense_candidates = 0
+            self._last_embedding_error = f"dense query failed: {type(exc).__name__}"
             return []
 
     def stats(self) -> Dict[str, object]:
+        mode = (settings.retrieval_mode or "bm25").lower()
+        dependency_available = SentenceTransformer is not None
+        local_enabled = bool(getattr(settings, "enable_local_embeddings", False))
+        dense_enabled = bool(self._qdrant_ready or self._local_embeddings_ready)
+        degraded_reason = self._hybrid_degraded_reason(mode, dependency_available, local_enabled, dense_enabled)
+        effective_mode = "hybrid_degraded_to_bm25" if mode == "hybrid" and degraded_reason else mode
         return {
             "chunks": len(self._chunks),
-            "retrieval_mode": settings.retrieval_mode,
+            "retrieval_mode": mode,
+            "effective_retrieval_mode": effective_mode,
+            "bm25_ready": bool(self._chunks),
             "qdrant_ready": self._qdrant_ready,
             "qdrant_last_error": self._last_qdrant_error,
-            "embedding_dependency_available": SentenceTransformer is not None,
+            "embedding_dependency_available": dependency_available,
             "embedding_model_loaded": self._embedding_model is not None,
             "embedding_model": settings.embedding_model,
             "embedding_last_error": self._last_embedding_error,
             "direct_qdrant_projection": settings.direct_qdrant_projection,
-            "local_embeddings_enabled": getattr(settings, "enable_local_embeddings", False),
+            "local_embeddings_enabled": local_enabled,
             "eager_local_embeddings": getattr(settings, "eager_local_embeddings", False),
             "local_embeddings_ready": self._local_embeddings_ready,
+            "local_embedding_index_status": self._local_embedding_index_status,
             "local_embedding_vectors": len(self._local_embeddings),
+            "hybrid_dense_enabled": dense_enabled,
+            "hybrid_degraded_reason": degraded_reason,
+            "last_dense_candidates": self._last_dense_candidates,
             "query_expansion": getattr(settings, "retrieval_query_expansion", True),
         }
+
+    def _hybrid_degraded_reason(
+        self,
+        mode: str,
+        dependency_available: bool,
+        local_enabled: bool,
+        dense_enabled: bool,
+    ) -> str:
+        if mode != "hybrid" or dense_enabled:
+            return ""
+        if not local_enabled and not getattr(settings, "direct_qdrant_projection", False):
+            return "disabled by config"
+        if local_enabled and not dependency_available:
+            return "dependency missing"
+        if self._local_embedding_index_status == "building":
+            return "indexing in progress"
+        if self._last_embedding_error:
+            return self._last_embedding_error
+        if self._last_qdrant_error:
+            return self._last_qdrant_error
+        return "dense retrieval not ready"
 
     def _rrf_fusion(
         self,

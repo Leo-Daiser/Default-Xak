@@ -498,21 +498,61 @@ The project is designed to work in CPU-only fallback mode first. Dense retrieval
 
 ### Hybrid retrieval without Qdrant
 
-For a single-machine demo you can use an in-memory sentence-transformers index instead of Qdrant:
+For Phase 1, use an in-memory sentence-transformers index instead of Qdrant.
+This keeps Neo4j as the source of truth and uses embeddings only for candidate
+retrieval.
 
 ```powershell
 $env:RETRIEVAL_MODE="hybrid"
 $env:ENABLE_LOCAL_EMBEDDINGS="true"
+$env:EAGER_LOCAL_EMBEDDINGS="false"
+$env:DIRECT_QDRANT_PROJECTION="false"
 $env:EMBEDDING_MODEL="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 uvicorn app.api:app --reload
 ```
 
-If the model is not installed/cached, the API continues with BM25. Check status:
+For Docker, install the optional dependency explicitly:
+
+```powershell
+$env:EXTRA_REQUIREMENTS="requirements-embeddings.txt"
+docker compose down
+docker compose --profile full up -d --build
+```
+
+`EAGER_LOCAL_EMBEDDINGS=false` keeps startup fast. The local vector index is
+built lazily on the first dense query. If the dependency/model is missing, the
+API continues with BM25 and reports a degradation reason.
+
+Check status:
 
 ```powershell
 curl "http://localhost:8000/health"
 curl "http://localhost:8000/debug/retrieval?question=Какие%20параметры%20указаны%20для%20клапана%20DN50"
+python evaluation/eval_semantic_retrieval.py
 ```
+
+Expected healthy Phase 1 retrieval diagnostics:
+
+```json
+"retrieval": {
+  "retrieval_mode": "hybrid",
+  "bm25_ready": true,
+  "embedding_dependency_available": true,
+  "local_embeddings_enabled": true,
+  "local_embeddings_ready": true,
+  "hybrid_dense_enabled": true,
+  "hybrid_degraded_reason": ""
+}
+```
+
+If it degrades safely, expect `effective_retrieval_mode:
+hybrid_degraded_to_bm25` and a concrete `hybrid_degraded_reason`, such as
+`dependency missing`, `model load failed`, `indexing failed`, or
+`disabled by config`.
+
+Use `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` as the
+default CPU-friendly demo model. `BAAI/bge-m3` can be tested only as an
+advanced heavier model when RAM/time are sufficient.
 
 ### Qdrant dense retrieval
 

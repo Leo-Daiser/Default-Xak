@@ -65,3 +65,25 @@ def test_ask_strict_no_exact_match_still_has_no_facts(tmp_path) -> None:
     assert payload["analytical_intent"] == "strict_material_regime_property"
     assert payload["retrieval"]["kg_backend_active"]
     assert "точных данных не найдено" in payload["answer"].lower()
+
+
+def test_dense_candidates_do_not_bypass_exact_constraints(tmp_path, monkeypatch) -> None:
+    client = seeded_client(tmp_path)
+    import app.api as api
+
+    monkeypatch.setattr(api.retrieval_engine, "dense_retrieve", lambda question, top_k=20: [(chunk.chunk_id, 1.0) for chunk in api.retrieval_engine.chunks])
+
+    response = client.post(
+        "/ask",
+        json={
+            "question": "Что делали по сплаву ВТ6 при криообработке и как изменилась вязкость?",
+            "top_k": 12,
+            "preset_id": "expert_max",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["status"] == "no_exact_match"
+    assert payload["facts"] == []
+    assert payload["diagnostics"]["preset_id"] == "expert_max"

@@ -27,6 +27,7 @@ services:
       context: .
       args:
         INSTALL_FULL: ${INSTALL_FULL:-false}
+        EXTRA_REQUIREMENTS: ${EXTRA_REQUIREMENTS:-requirements.txt}
     working_dir: /code/hackathon_project
     command: ["uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8000"]
     ports:
@@ -43,11 +44,12 @@ services:
       DATA_DIR: /data
       METADATA_DB_PATH: /data/outbox.sqlite3
       CATALOG_DB_PATH: /data/catalog.sqlite3
-      DIRECT_QDRANT_PROJECTION: "false"
-      RETRIEVAL_MODE: bm25
-      ENABLE_LOCAL_EMBEDDINGS: "false"
-      EAGER_LOCAL_EMBEDDINGS: "false"
-      RETRIEVAL_QUERY_EXPANSION: "true"
+      DIRECT_QDRANT_PROJECTION: ${DIRECT_QDRANT_PROJECTION:-false}
+      RETRIEVAL_MODE: ${RETRIEVAL_MODE:-bm25}
+      ENABLE_LOCAL_EMBEDDINGS: ${ENABLE_LOCAL_EMBEDDINGS:-false}
+      EAGER_LOCAL_EMBEDDINGS: ${EAGER_LOCAL_EMBEDDINGS:-false}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}
+      RETRIEVAL_QUERY_EXPANSION: ${RETRIEVAL_QUERY_EXPANSION:-true}
       LLM_ENABLED: ${LLM_ENABLED:-}
       ENABLE_LLM: ${ENABLE_LLM:-}
       LLM_PROVIDER: ${LLM_PROVIDER:-auto}
@@ -78,6 +80,7 @@ services:
       context: .
       args:
         INSTALL_FULL: ${INSTALL_FULL:-false}
+        EXTRA_REQUIREMENTS: ${EXTRA_REQUIREMENTS:-requirements.txt}
     command: ["streamlit", "run", "/code/hackathon_project/app/ui.py", "--server.address", "0.0.0.0", "--server.port", "8501"]
     ports:
       - "8501:8501"

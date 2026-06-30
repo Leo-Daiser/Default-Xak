@@ -402,8 +402,7 @@ def _parsed_metadata(parsed: Any, source_url: str | None = None) -> Dict[str, An
 
 def _qdrant_outbox_enabled() -> bool:
     """Whether new chunks should be queued for optional Qdrant projection."""
-    mode = (settings.retrieval_mode or "bm25").lower()
-    return bool(settings.direct_qdrant_projection or mode in {"hybrid", "embedding"})
+    return bool(settings.direct_qdrant_projection)
 
 
 def _enqueue_qdrant_projection(chunks: List[Chunk]) -> int:
