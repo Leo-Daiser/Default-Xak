@@ -742,10 +742,11 @@ DOMAIN_QUESTION_MARKERS = [
     "клапан", "насос", "dn", "pn", "артикул", "деталь", "корпус", "узел",
     "прочность", "твёрд", "тверд", "пластич", "корроз", "давлен", "температур",
     "отжиг", "закал", "старен", "режим", "эксперимент", "измер", "свойств",
+    "пробел", "не хватает", "нет данных",
     "оборуд", "установк", "лаборатор", "команд", "стандарт", "гост", "iso", "astm",
     "изображ", "схем", "монтаж", "чертеж", "рисунок",
     "valve", "pump", "alloy", "steel", "material", "strength", "hardness", "corrosion",
-    "anneal", "quench", "aging", "aged", "experiment", "property", "standard", "image", "diagram",
+    "anneal", "quench", "aging", "aged", "experiment", "property", "standard", "gap", "image", "diagram",
 ]
 
 

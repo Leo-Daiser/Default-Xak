@@ -480,6 +480,54 @@ python evaluation\eval_answer_quality.py
 python evaluation\eval_ui_product.py
 ```
 
+## Pre-demo checklist
+
+Перед показом запускайте один контролируемый gate вместо ручной проверки
+разрозненных экранов. Реальные API keys должны лежать только в локальном
+`.env`; не копируйте их в `.env.example`, README, код, логи или чат.
+
+Полная пересборка API с optional local embeddings:
+
+```powershell
+docker compose down
+$env:EXTRA_REQUIREMENTS="requirements-embeddings.txt"
+$env:RETRIEVAL_MODE="hybrid"
+$env:ENABLE_LOCAL_EMBEDDINGS="true"
+$env:EAGER_LOCAL_EMBEDDINGS="false"
+$env:DIRECT_QDRANT_PROJECTION="false"
+$env:EMBEDDING_MODEL="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+docker compose --profile full build --no-cache api
+docker compose --profile full up -d
+```
+
+Проверки внутри контейнера:
+
+```powershell
+docker compose exec api python scripts/check_mistral_connection.py
+docker compose exec api python scripts/check_embeddings_runtime.py
+docker compose exec api python scripts/demo_gate.py
+curl http://localhost:8000/health
+```
+
+Если нужно проверить только импорт `sentence-transformers`:
+
+```powershell
+docker compose exec api python -c "import sentence_transformers; print('sentence-transformers ok')"
+```
+
+Интерпретация `scripts/demo_gate.py`:
+
+- `PASS` — проект можно показывать по основному demo path.
+- `WARN` по embeddings допустим, если BM25 работает: это означает controlled
+  degradation, а не падение retrieval.
+- `FAIL` по Neo4j, LLM, preset mapping, `/ask` или raw leakage нужно исправить
+  до показа.
+
+Gate проверяет `/health`, активный Neo4j, готовность LLM, retrieval diagnostics,
+runtime presets, несколько demo-вопросов, отсутствие `technical_answer`,
+`doc_`, `chunk_`, `EXP-`, `SCI-` и raw graph labels в основном ответе, а также
+security sanity-check для `.env` и release package.
+
 Полезные endpoints:
 
 ```powershell
