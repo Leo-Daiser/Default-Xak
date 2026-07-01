@@ -11,6 +11,7 @@ from typing import Any, Iterable, List
 
 from ..config import settings
 from ..models.schemas import Chunk
+from ..parsing.text_quality import normalize_dirty_scientific_text
 from .document_models import (
     DocumentIntelligenceResult,
     ParsedBlock,
@@ -289,6 +290,10 @@ def table_to_row_chunks(
             ]
             if part
         )
+        original_text_hash = _hash_text(text)
+        normalized_text = normalize_dirty_scientific_text(text)
+        normalization_applied = normalized_text != text
+        text = normalized_text
         text_hash = _hash_text(text)
         ordinal = start_ordinal + len(chunks)
         chunks.append(
@@ -321,6 +326,8 @@ def table_to_row_chunks(
                     "table_caption": table.caption,
                     "source_block_id": table.source_block_id,
                     "parser_version": PARSER_VERSION,
+                    "text_normalization_applied": normalization_applied,
+                    "original_text_hash": original_text_hash if normalization_applied else None,
                 },
             )
         )
@@ -990,6 +997,10 @@ def _make_chunk_from_text(
     char_end: int | None,
     extra_metadata: dict[str, Any] | None = None,
 ) -> Chunk:
+    original_text_hash = _hash_text(text)
+    normalized_text = normalize_dirty_scientific_text(text)
+    normalization_applied = normalized_text != text
+    text = normalized_text
     text_hash = _hash_text(text)
     return Chunk(
         chunk_id=_stable_chunk_id(doc_id, block_id, ordinal, text_hash),
@@ -1017,6 +1028,8 @@ def _make_chunk_from_text(
             "block_type": block_type,
             "block_id": block_id,
             "parser_version": PARSER_VERSION,
+            "text_normalization_applied": normalization_applied,
+            "original_text_hash": original_text_hash if normalization_applied else None,
         },
     )
 
@@ -1135,4 +1148,3 @@ def _stable_chunk_id(doc_id: str, anchor: str, ordinal: int, text_hash: str) -> 
 def _backend_mode() -> str:
     mode = str(getattr(settings, "parser_backend", "auto") or "auto").lower()
     return mode if mode in {"auto", "docling", "markitdown", "fallback"} else "auto"
-

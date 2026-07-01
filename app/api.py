@@ -425,6 +425,17 @@ def _parsed_metadata(parsed: Any, source_url: str | None = None) -> Dict[str, An
     }
 
 
+def _document_parse_status(parsed: Any) -> str:
+    diagnostics = getattr(parsed, "diagnostics", {}) or {}
+    if diagnostics.get("scanned_pdf_detected") and not getattr(settings, "enable_ocr", False):
+        return "ocr_required"
+    if getattr(parsed, "chunks", None):
+        return "ingested"
+    if getattr(parsed, "text", ""):
+        return "partial"
+    return "empty_or_parse_failed"
+
+
 def _qdrant_outbox_enabled() -> bool:
     """Whether new chunks should be queued for optional Qdrant projection."""
     return bool(settings.direct_qdrant_projection)
@@ -1343,9 +1354,28 @@ async def ingest_documents(files: List[UploadFile] = File(...)):
         tmp_path = Path(tempfile.gettempdir()) / f"{doc_id}_{safe_name}"
         tmp_path.write_bytes(content)
 
-        parsed = parser_router.parse_document_intelligence(str(tmp_path), doc_id=doc_id, source_type="file")
+        try:
+            parsed = parser_router.parse_document_intelligence(str(tmp_path), doc_id=doc_id, source_type="file")
+        except Exception as exc:
+            responses.append(
+                {
+                    "filename": safe_name,
+                    "doc_id": doc_id,
+                    "source_uid": source_uid,
+                    "status": "parse_failed",
+                    "parser": "unknown",
+                    "chunks": 0,
+                    "parser_error": f"{type(exc).__name__}: {str(exc)[:300]}",
+                    "parser_diagnostics": {"warnings": ["parser_failed"]},
+                    "document_version": document_version,
+                    "knowledge_expansion": {"status": "skipped", "reason": "parser_failed"},
+                    "strict_graph_projection": {"status": "skipped", "reason": "parser_failed"},
+                }
+            )
+            continue
         parsed_metadata = _parsed_metadata(parsed)
         parser_name = parsed_metadata.get("parser", "unknown")
+        document_status = _document_parse_status(parsed)
 
         doc_meta = Document(
             doc_id=doc_id,
@@ -1355,7 +1385,7 @@ async def ingest_documents(files: List[UploadFile] = File(...)):
             external_id=content_hash,
             parser=parser_name,
             language=parsed_metadata.get("language"),
-            status="ingested" if parsed.chunks else "empty_or_parse_failed",
+            status=document_status,
             created_at=None,
             updated_at=ingested_at,
             version=document_version,
@@ -1387,6 +1417,7 @@ async def ingest_documents(files: List[UploadFile] = File(...)):
                 "content_hash": content_hash,
                 "document_version": document_version,
                 "ingested_at": ingested_at,
+                "parse_status": document_status,
                 "parser_diagnostics": parsed.diagnostics,
                 "document_intelligence": parsed_metadata["document_intelligence"],
             },
@@ -1471,6 +1502,7 @@ async def ingest_documents(files: List[UploadFile] = File(...)):
                 "doc_id": doc_id,
                 "source_uid": source_uid,
                 "status": doc_meta.status,
+                "parse_status": document_status,
                 "parser": parser_name,
                 "chunks": len(rich_chunks),
                 "parser_error": parsed_metadata.get("parser_error"),
