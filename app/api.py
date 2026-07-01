@@ -6,6 +6,7 @@ import hashlib
 import re
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Any
 
@@ -33,6 +34,7 @@ from .graph.neo4j_connection import check_neo4j_connection
 from .graph.graph_repository import GraphRepositoryFactory, repository_backend_name
 from .graph.graph_writer import sync_catalog_to_neo4j
 from .ingestion.parser_router import ParserRouter
+from .knowledge.expansion import KnowledgeExpansionEngine, build_knowledge_expansion_report
 from .llm.structured_llm import StructuredLLM
 from .models.schemas import Chunk, Document
 from .retrieval.graph_retriever import GraphRetriever
@@ -304,6 +306,26 @@ def _stable_source_id(content_hash: str) -> str:
     return f"source_{content_hash[:24]}"
 
 
+def _document_version_for(source_name: str, content_hash: str) -> int:
+    """Return stable version for same content and next version for changed file content."""
+
+    versions: list[int] = []
+    for item in catalog.list_document_records():
+        metadata = item.get("metadata") or {}
+        title = item.get("filename") or item.get("title")
+        if title != source_name:
+            continue
+        version = int(item.get("version") or metadata.get("document_version") or 1)
+        if metadata.get("content_hash") == content_hash:
+            return version
+        versions.append(version)
+    return (max(versions) + 1) if versions else 1
+
+
+def _knowledge_report(active_only: bool = True, document_id: str | None = None) -> Dict[str, Any]:
+    return build_knowledge_expansion_report(catalog, document_id=document_id, active_only=active_only)
+
+
 def _allowed_upload_extensions() -> set[str]:
     raw = str(getattr(settings, "allowed_upload_extensions", ".pdf,.docx,.pptx,.xlsx,.csv,.html,.htm,.txt,.md"))
     return {item.strip().lower() for item in raw.split(",") if item.strip()}
@@ -351,11 +373,13 @@ def _get_document_meta(doc_id: str):
 
 def _source_for_chunk(chunk: Chunk) -> Dict[str, Any]:
     doc_meta = _get_document_meta(chunk.doc_id)
+    source_name = chunk.metadata.get("source_name") or chunk.metadata.get("filename") or (doc_meta.title if doc_meta else chunk.doc_id)
     return {
         "doc_id": chunk.doc_id,
         "chunk_id": chunk.chunk_id,
-        "title": chunk.metadata.get("filename") or (doc_meta.title if doc_meta else chunk.doc_id),
+        "title": source_name,
         "filename": chunk.metadata.get("filename") or (doc_meta.title if doc_meta else None),
+        "source_name": source_name,
         "source_type": chunk.metadata.get("source_type", "file"),
         "source_url": chunk.metadata.get("source_url"),
         "page_start": chunk.page_start,
@@ -1198,6 +1222,46 @@ async def debug_graph_stats():
         return {"graph": "neo4j", "error": str(exc), "stats": {}, **_kg_backend_diagnostics(active_graph)}
 
 
+@app.get("/knowledge/summary")
+async def knowledge_summary():
+    report = _knowledge_report(active_only=True)
+    return {
+        "status": report.get("status"),
+        "documents_count": report.get("documents_count"),
+        "active_documents_count": report.get("active_documents_count"),
+        "chunks_count": report.get("chunks_count"),
+        "active_chunks_count": report.get("active_chunks_count"),
+        "canonical_facts_count": report.get("canonical_facts_count"),
+        "new_connections_count": len(report.get("comparison_opportunities") or []),
+        "conflict_groups_count": report.get("conflict_groups_count"),
+        "data_gaps_count": report.get("data_gaps_count"),
+        "facts_without_evidence": report.get("facts_without_evidence"),
+        "last_ingested_at": max((item.get("updated_at") or "" for item in report.get("documents") or []), default=None),
+        "resources": report.get("resources"),
+    }
+
+
+@app.get("/knowledge/expansion-report")
+async def knowledge_expansion_report(document_id: str | None = Query(default=None), active_only: bool = Query(default=True)):
+    return _knowledge_report(active_only=active_only, document_id=document_id)
+
+
+@app.post("/knowledge/rebuild")
+async def knowledge_rebuild():
+    rebuild = _rebuild_runtime_indexes_from_active_catalog()
+    report = _knowledge_report(active_only=True)
+    return {"status": "rebuilt", "reindexed": rebuild, "summary": await knowledge_summary(), "report": report}
+
+
+@app.post("/knowledge/sync-neo4j")
+async def knowledge_sync_neo4j():
+    active_graph = _graph_db_for_repository()
+    if _configured_kg_backend() == "neo4j" and active_graph is None:
+        raise HTTPException(status_code=503, detail={**_kg_backend_diagnostics(active_graph), "error": "Neo4j is required by KG_BACKEND=neo4j"})
+    sync = _sync_strict_graph_to_neo4j(active_graph)
+    return {"status": "synced" if sync.get("status") == "synced" else "skipped", "strict_graph_projection": sync, "summary": await knowledge_summary()}
+
+
 @app.get("/documents")
 async def list_documents():
     return catalog.list_document_records()
@@ -1210,11 +1274,13 @@ async def set_document_active(doc_id: str, request: DocumentActiveRequest):
     if not catalog.set_document_active(doc_id, request.active):
         raise HTTPException(status_code=404, detail="Document not found")
     rebuild = _rebuild_runtime_indexes_from_active_catalog()
+    active_graph = _graph_db_for_repository()
+    strict_graph_projection = _sync_strict_graph_to_neo4j(active_graph)
     return {
         "doc_id": doc_id,
         "active": request.active,
         "reindexed": rebuild,
-        "warning": "Neo4j graph is refreshed only after /graph/refresh or sync_graph_to_neo4j.",
+        "strict_graph_projection": strict_graph_projection,
     }
 
 
@@ -1225,7 +1291,9 @@ async def deactivate_document(doc_id: str):
     if not catalog.set_document_active(doc_id, False):
         raise HTTPException(status_code=404, detail="Document not found")
     rebuild = _rebuild_runtime_indexes_from_active_catalog()
-    return {"doc_id": doc_id, "active": False, "deleted": False, "reindexed": rebuild}
+    active_graph = _graph_db_for_repository()
+    strict_graph_projection = _sync_strict_graph_to_neo4j(active_graph)
+    return {"doc_id": doc_id, "active": False, "deleted": False, "reindexed": rebuild, "strict_graph_projection": strict_graph_projection}
 
 
 @app.post("/graph/refresh")
@@ -1266,9 +1334,12 @@ async def ingest_documents(files: List[UploadFile] = File(...)):
             continue
         _validate_upload_size(content, safe_name)
 
+        before_knowledge_report = _knowledge_report(active_only=True)
         content_hash = _sha256(content)
         doc_id = _stable_doc_id(content_hash)
         source_uid = _stable_source_id(content_hash)
+        document_version = _document_version_for(safe_name, content_hash)
+        ingested_at = datetime.now(timezone.utc).isoformat()
         tmp_path = Path(tempfile.gettempdir()) / f"{doc_id}_{safe_name}"
         tmp_path.write_bytes(content)
 
@@ -1286,8 +1357,8 @@ async def ingest_documents(files: List[UploadFile] = File(...)):
             language=parsed_metadata.get("language"),
             status="ingested" if parsed.chunks else "empty_or_parse_failed",
             created_at=None,
-            updated_at=None,
-            version=1,
+            updated_at=ingested_at,
+            version=document_version,
         )
 
         rich_chunks: List[Chunk] = []
@@ -1298,6 +1369,8 @@ async def ingest_documents(files: List[UploadFile] = File(...)):
             chunk.embedding_version = chunk.embedding_version or settings.embedding_model
             chunk.metadata.setdefault("parser", parser_name)
             chunk.metadata.setdefault("filename", safe_name)
+            chunk.metadata.setdefault("source_name", safe_name)
+            chunk.metadata.setdefault("source_title", safe_name)
             chunk.metadata.setdefault("source_type", "file")
             chunk.metadata.setdefault("source_url", None)
             chunk.metadata.setdefault("parser_name", parser_name)
@@ -1310,12 +1383,20 @@ async def ingest_documents(files: List[UploadFile] = File(...)):
             doc_meta,
             metadata={
                 "filename": safe_name,
+                "source_type": "file",
                 "content_hash": content_hash,
+                "document_version": document_version,
+                "ingested_at": ingested_at,
                 "parser_diagnostics": parsed.diagnostics,
                 "document_intelligence": parsed_metadata["document_intelligence"],
             },
         )
         catalog.replace_chunks(doc_id, rich_chunks)
+        knowledge_delta = KnowledgeExpansionEngine(catalog).build_delta_report(
+            before_knowledge_report,
+            document_id=doc_id,
+            active_only=True,
+        )
 
         if active_graph:
             active_graph.upsert_source(
@@ -1394,6 +1475,8 @@ async def ingest_documents(files: List[UploadFile] = File(...)):
                 "chunks": len(rich_chunks),
                 "parser_error": parsed_metadata.get("parser_error"),
                 "parser_diagnostics": parsed.diagnostics,
+                "document_version": document_version,
+                "knowledge_expansion": knowledge_delta,
                 "strict_graph_projection": strict_graph_projection,
             }
         )
@@ -1420,7 +1503,8 @@ async def ingest_url(url: str):
 
     url = fetched.url
     content_type = fetched.content_type
-    if "html" not in content_type.lower() and not url.lower().endswith((".html", ".htm")):
+    content_type_lower = str(content_type or "").lower()
+    if "text/html" not in content_type_lower and "application/xhtml+xml" not in content_type_lower:
         raise HTTPException(status_code=400, detail=f"URL content is not HTML: {content_type or 'unknown'}")
 
     content = fetched.content
@@ -1430,6 +1514,9 @@ async def ingest_url(url: str):
     safe_name = Path(url.split("?")[0].rstrip("/")).name or "online_resource.html"
     if not safe_name.endswith((".html", ".htm")):
         safe_name = f"{safe_name}.html"
+    before_knowledge_report = _knowledge_report(active_only=True)
+    document_version = _document_version_for(safe_name, content_hash)
+    ingested_at = datetime.now(timezone.utc).isoformat()
     tmp_path = Path(tempfile.gettempdir()) / f"{doc_id}_{safe_name}"
     tmp_path.write_bytes(content)
 
@@ -1447,8 +1534,8 @@ async def ingest_url(url: str):
         language=parsed_metadata.get("language"),
         status="ingested" if parsed.chunks else "empty_or_parse_failed",
         created_at=None,
-        updated_at=None,
-        version=1,
+        updated_at=ingested_at,
+        version=document_version,
     )
 
     rich_chunks: List[Chunk] = []
@@ -1460,9 +1547,11 @@ async def ingest_url(url: str):
         chunk.metadata.setdefault("parser", parser_name)
         chunk.metadata.setdefault("parser_name", parser_name)
         chunk.metadata.setdefault("parser_error", parsed_metadata.get("parser_error"))
-        chunk.metadata.setdefault("filename", safe_name)
-        chunk.metadata.setdefault("source_type", "url")
-        chunk.metadata.setdefault("source_url", url)
+        chunk.metadata["filename"] = safe_name
+        chunk.metadata["source_name"] = title
+        chunk.metadata["source_title"] = title
+        chunk.metadata["source_type"] = "url"
+        chunk.metadata["source_url"] = url
         rich_chunks.append(chunk)
 
     DOCUMENTS[doc_id] = doc_meta
@@ -1471,13 +1560,23 @@ async def ingest_url(url: str):
         doc_meta,
         metadata={
             "filename": safe_name,
+            "source_name": title,
+            "source_title": title,
             "source_url": url,
+            "source_type": "url",
             "content_hash": content_hash,
+            "document_version": document_version,
+            "ingested_at": ingested_at,
             "parser_diagnostics": parsed.diagnostics,
             "document_intelligence": parsed_metadata["document_intelligence"],
         },
     )
     catalog.replace_chunks(doc_id, rich_chunks)
+    knowledge_delta = KnowledgeExpansionEngine(catalog).build_delta_report(
+        before_knowledge_report,
+        document_id=doc_id,
+        active_only=True,
+    )
     retrieval_engine.index_chunks(rich_chunks, replace_doc_id=doc_id)
 
     active_graph = _graph_db_for_repository()
@@ -1493,6 +1592,7 @@ async def ingest_url(url: str):
     return {
         "ingested": {
             "url": url,
+            "source_name": title,
             "doc_id": doc_id,
             "source_uid": source_uid,
             "status": doc_meta.status,
@@ -1500,6 +1600,8 @@ async def ingest_url(url: str):
             "chunks": len(rich_chunks),
             "parser_error": parsed_metadata.get("parser_error"),
             "parser_diagnostics": parsed.diagnostics,
+            "document_version": document_version,
+            "knowledge_expansion": knowledge_delta,
             "strict_graph_projection": strict_graph_projection,
         }
     }

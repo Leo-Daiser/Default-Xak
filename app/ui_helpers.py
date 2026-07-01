@@ -6,6 +6,7 @@ import html
 import math
 import re
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 
 INTERNAL_ID_RE = re.compile(r"\b(?:doc_[A-Za-z0-9_:-]+|chunk_[A-Za-z0-9_:-]+|EXP-[A-Za-z0-9_-]+|SCI-[A-Za-z0-9_-]+)\b")
@@ -53,11 +54,11 @@ def facts_to_user_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 "Свойство": row.get("property"),
                 "Значение": row.get("value") if row.get("value") is not None else row.get("raw_value"),
                 "Ед.": row.get("unit"),
+                "Нормализовано": _normalized_value_label(row),
                 "Эффект": _effect_label(row.get("effect")),
                 "Оборудование": _join(row.get("equipment")),
                 "Лаборатория": _join(row.get("laboratory") or row.get("laboratories")),
-                "Experiment ID": row.get("experiment_id"),
-                "Chunk ID": row.get("source_chunk_id") or row.get("chunk_id"),
+                "Основание": _fact_basis(row),
             }
         )
     return result
@@ -77,6 +78,10 @@ def evidence_to_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
         result.append(
             {
                 "source_name": row.get("source_name") or row.get("title") or row.get("filename"),
+                "source_url": row.get("source_url"),
+                "source_type": row.get("source_type"),
+                "title": row.get("title"),
+                "filename": row.get("filename"),
                 "doc_id": row.get("document_id") or row.get("doc_id"),
                 "chunk_id": row.get("chunk_id"),
                 "page": row.get("page") or row.get("page_start"),
@@ -93,15 +98,80 @@ def evidence_to_user_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
     """Return evidence rows with readable column names."""
 
     return [
-        {
-            "Источник": row.get("source_name"),
-            "Фрагмент": row.get("chunk_id"),
+            {
+                "Источник": friendly_source_name(
+                    row.get("source_name"),
+                    source_url=row.get("source_url"),
+                    source_type=row.get("source_type"),
+                    title=row.get("title"),
+                ),
             "Страница": row.get("page"),
             "Тип": row.get("evidence_type") or row.get("retrieval_backend"),
             "Цитата": row.get("quote"),
         }
         for row in evidence_to_rows(payload)
     ]
+
+
+def answer_evidence_summary_rows(payload: dict[str, Any], limit: int = 5) -> list[dict[str, Any]]:
+    """Return compact user-facing fact/evidence rows for the main answer."""
+
+    facts = payload.get("primary_facts") or payload.get("facts") or []
+    result: list[dict[str, Any]] = []
+    seen = set()
+    for fact in facts:
+        if not isinstance(fact, dict):
+            continue
+        row = _answer_evidence_summary_row(payload, fact)
+        if not row:
+            continue
+        identity = (
+            row.get("Материал"),
+            row.get("Режим"),
+            row.get("Свойство"),
+            row.get("Значение"),
+            row.get("Источник"),
+            row.get("Фрагмент"),
+        )
+        if identity in seen:
+            continue
+        seen.add(identity)
+        result.append(row)
+        if len(result) >= limit:
+            break
+    return result
+
+
+def conflict_explanation_rows(payload: dict[str, Any], limit: int = 3) -> list[dict[str, Any]]:
+    """Return compact conflict explanations for the main UI without raw ids."""
+
+    diagnostics = payload.get("diagnostics") or {}
+    conflicts = diagnostics.get("fact_conflicts") or payload.get("fact_conflicts") or []
+    result: list[dict[str, Any]] = []
+    for conflict in conflicts:
+        if not isinstance(conflict, dict):
+            continue
+        material = _clean_public_text(conflict.get("material")) or "материала"
+        regime = _clean_public_text(conflict.get("regime"))
+        prop = _property_for_sentence(_clean_public_text(conflict.get("property")) or "свойства")
+        values = _conflict_values_label(conflict)
+        if not values:
+            continue
+        regime_text = f" после {_regime_for_sentence(regime)}" if regime else ""
+        reason = _conflict_reason_label(conflict.get("possible_reason"))
+        description = (
+            f"Для {material}{regime_text} найдены разные значения {prop}: {values}. "
+            f"Возможная причина: {reason}."
+        )
+        result.append(
+            {
+                "Описание": _clean_public_text(description),
+                "Источников": conflict.get("sources_count"),
+            }
+        )
+        if len(result) >= limit:
+            break
+    return result
 
 
 def subgraph_to_tables(subgraph: dict[str, Any] | None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -173,6 +243,7 @@ def diagnostics_to_safe_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "kg_backend_active": retrieval.get("kg_backend_active") or diagnostics.get("kg_backend_active"),
         "answer_mode": payload.get("answer_mode"),
         "analytical_intent": payload.get("analytical_intent"),
+        "fact_conflicts_count": len(diagnostics.get("fact_conflicts") or []),
         "warnings": diagnostics.get("warnings") or [],
     }
 
@@ -189,7 +260,7 @@ def documents_to_rows(payload: dict[str, Any] | list[dict[str, Any]]) -> list[di
         intelligence = item.get("document_intelligence") or {}
         result.append(
             {
-                "Документ": item.get("filename") or item.get("title"),
+                "Документ": (item.get("source_name") or item.get("source_title") or item.get("title")) if (item.get("source_type") or intelligence.get("source_type")) == "url" else item.get("filename") or item.get("title"),
                 "Тип": item.get("source_type") or intelligence.get("source_type") or "file",
                 "Chunks": item.get("chunks"),
                 "Активен": bool(item.get("active", True)),
@@ -389,6 +460,288 @@ def _join(value: Any) -> str | None:
     return str(value) if value else None
 
 
+def _answer_evidence_summary_row(payload: dict[str, Any], fact: dict[str, Any]) -> dict[str, Any] | None:
+    material = _clean_public_text(fact.get("material"))
+    regime = _clean_public_text(fact.get("regime"))
+    prop = _clean_public_text(fact.get("property"))
+    value_label = _summary_value_label(fact) or _effect_label(fact.get("effect"))
+    if not any([material, regime, prop, value_label]):
+        return None
+
+    source, quote = _public_evidence_for_fact(payload, fact)
+    material = material or "материал не указан"
+    regime = regime or "режим не указан"
+    prop = prop or "свойство не указано"
+    value_label = value_label or "значение не указано"
+    original = _summary_original_value_label(fact)
+    if _same_display_value(original, value_label):
+        original = None
+    return {
+        "Факт": f"{material} · {regime} · {prop}: {value_label}",
+        "Материал": material,
+        "Режим": regime,
+        "Свойство": prop,
+        "Значение": value_label,
+        "Исходное значение": original,
+        "Источник": source,
+        "Фрагмент": quote,
+    }
+
+
+def _public_evidence_for_fact(payload: dict[str, Any], fact: dict[str, Any]) -> tuple[str, str]:
+    candidates: list[dict[str, Any]] = []
+    evidence = fact.get("evidence")
+    if isinstance(evidence, list):
+        candidates.extend(item for item in evidence if isinstance(item, dict))
+    if fact.get("source_name") or fact.get("quote"):
+        candidates.append(fact)
+
+    top_level = [item for item in evidence_to_rows(payload) if isinstance(item, dict)]
+    matching = [item for item in top_level if _fact_matches_evidence(fact, item)]
+    candidates.extend(matching)
+    candidates.extend(top_level)
+
+    for item in candidates:
+        source = _public_source_name(item, fact_material=fact.get("material"))
+        quote = _public_quote(item)
+        if quote or source != "источник корпуса":
+            return source, quote
+    return "источник корпуса", "цитата не сохранена в кратком виде"
+
+
+def _fact_matches_evidence(fact: dict[str, Any], evidence: dict[str, Any]) -> bool:
+    fact_ids = {
+        str(fact.get("source_chunk_id") or ""),
+        str(fact.get("chunk_id") or ""),
+        str(fact.get("document_id") or fact.get("doc_id") or ""),
+    }
+    for item in fact.get("evidence") or []:
+        if isinstance(item, dict):
+            fact_ids.add(str(item.get("chunk_id") or ""))
+            fact_ids.add(str(item.get("document_id") or item.get("doc_id") or ""))
+    fact_ids.discard("")
+    evidence_ids = {
+        str(evidence.get("chunk_id") or ""),
+        str(evidence.get("document_id") or evidence.get("doc_id") or ""),
+    }
+    evidence_ids.discard("")
+    return bool(fact_ids and evidence_ids and fact_ids.intersection(evidence_ids))
+
+
+def _public_source_name(row: dict[str, Any], *, fact_material: Any = None) -> str:
+    raw = row.get("source_name") or row.get("title") or row.get("filename")
+    return friendly_source_name(
+        raw,
+        material=fact_material,
+        source_url=row.get("source_url"),
+        source_type=row.get("source_type"),
+        title=row.get("title"),
+    )
+
+
+def friendly_source_name(raw: Any, *, material: Any = None, source_url: Any = None, source_type: Any = None, title: Any = None) -> str:
+    """Return a user-facing source label while keeping raw provenance elsewhere."""
+
+    raw_text = str(raw or "").strip()
+    url_text = str(source_url or "").strip()
+    is_url = str(source_type or "").lower() == "url" or _looks_like_url(raw_text) or _looks_like_url(url_text)
+    if is_url:
+        title_text = _clean_web_title(title or (raw_text if not _looks_like_url(raw_text) else ""))
+        if title_text:
+            return _shorten(title_text, 80)
+        url_label = _friendly_url_label(url_text or raw_text)
+        if url_label:
+            return url_label
+        return "Источник из веб-страницы"
+
+    if not raw_text:
+        return "Источник из корпуса"
+    filename = raw_text.replace("\\", "/").rsplit("/", 1)[-1]
+    filename = re.sub(r"^doc_[0-9a-fA-F]{8,64}_", "", filename)
+    stem = re.sub(r"\.[A-Za-z0-9]{1,8}$", "", filename)
+    stem = INTERNAL_ID_RE.sub("", stem)
+    normalized = _normalize_source_stem(stem)
+    material_label = _source_material_label(_normalize_source_stem(str(material or ""))) or _source_material_label(normalized)
+    tokens = _source_tokens(normalized)
+    meaningful_tokens = [token for token in tokens if token not in _SOURCE_NOISE_TOKENS]
+
+    if any(token in tokens for token in {"article", "paper", "publication", "статья"}):
+        return f"Статья по {material_label}" if material_label else "Статья из корпуса"
+    if _has_heat_treatment_signal(tokens):
+        return f"Данные по термообработке {material_label}" if material_label else "Данные по термообработке"
+    if any(token in tokens for token in {"experiment", "experiments", "эксперимент", "эксперименты"}):
+        return f"Экспериментальные данные по {material_label}" if material_label else "Данные экспериментов"
+    if material_label:
+        return f"Материал по {material_label}"
+    if not meaningful_tokens:
+        return "Источник из корпуса"
+    return "Источник из корпуса"
+
+
+def _looks_like_url(value: str) -> bool:
+    parsed = urlparse(str(value or ""))
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _clean_web_title(value: Any) -> str | None:
+    text = _clean_public_text(value)
+    if not text or _looks_like_url(text) or INTERNAL_ID_RE.search(text):
+        return None
+    lowered = text.lower()
+    if lowered in {"online_resource", "online resource", "index", "page"}:
+        return None
+    return text
+
+
+def _friendly_url_label(value: Any) -> str | None:
+    parsed = urlparse(str(value or "").strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    domain = parsed.netloc.lower()
+    if domain.startswith("www."):
+        domain = domain[4:]
+    path_parts = [unquote(part) for part in parsed.path.split("/") if part]
+    label = ""
+    if path_parts:
+        stem = re.sub(r"\.[A-Za-z0-9]{1,8}$", "", path_parts[-1])
+        stem = re.sub(r"[_\\-]+", " ", stem)
+        stem = re.sub(r"\s+", " ", stem).strip()
+        label = stem
+    return _shorten(f"{domain} · {label}" if label else domain, 80)
+
+
+def _public_quote(row: dict[str, Any]) -> str:
+    quote = _clean_public_text(_compact_table_quote(row.get("quote")))
+    return _shorten(quote, 180) if quote else "цитата не сохранена в кратком виде"
+
+
+_SOURCE_NOISE_TOKENS = {
+    "api",
+    "corpus",
+    "data",
+    "demo",
+    "doc",
+    "file",
+    "neo4j",
+    "sample",
+    "source",
+    "synthetic",
+    "test",
+    "txt",
+    "csv",
+    "html",
+    "htm",
+    "xlsx",
+    "md",
+}
+
+
+def _normalize_source_stem(value: str) -> str:
+    text = value.lower().replace("ё", "е")
+    text = text.replace("ti-6al-4v", "ti6al4v")
+    text = text.replace("ti_6al_4v", "ti6al4v")
+    text = text.replace("7075-t6", "7075t6")
+    text = text.replace("7075_t6", "7075t6")
+    text = re.sub(r"[^0-9a-zа-я]+", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _source_tokens(value: str) -> list[str]:
+    return [token for token in value.split() if token]
+
+
+def _source_material_label(value: str) -> str | None:
+    compact = re.sub(r"\s+", "", value.lower())
+    if "вт6" in compact or "vt6" in compact:
+        return "ВТ6"
+    if "ti6al4v" in compact:
+        return "Ti-6Al-4V"
+    if "7075t6" in compact or "7075" in compact:
+        return "7075-T6"
+    if "12х18н10т" in compact or "12x18h10t" in compact or "12x18n10t" in compact:
+        return "12Х18Н10Т"
+    if "alloy825" in compact or "825" in compact:
+        return "Alloy 825"
+    return None
+
+
+def _has_heat_treatment_signal(tokens: list[str]) -> bool:
+    token_set = set(tokens)
+    return bool(
+        {"heat", "thermal", "treatment", "thermo", "термообработка", "термообработке", "отжиг", "annealing"}
+        & token_set
+    ) or ("heat" in token_set and "treatment" in token_set)
+
+
+def _compact_table_quote(value: Any) -> str:
+    text = str(value or "")
+    if "Table columns:" not in text and "experiment_id:" not in text:
+        return text
+    data_line = next((line for line in text.splitlines() if "material:" in line and "property:" in line), text)
+    fields = []
+    allowed_prefixes = ("material:", "process_regime:", "property:", "value:", "unit:", "effect:", "conclusion:", "data_gap:")
+    for part in data_line.split("|"):
+        cleaned = part.strip()
+        if cleaned.lower().startswith(allowed_prefixes):
+            fields.append(cleaned)
+    return "; ".join(fields) if fields else text
+
+
+def _summary_value_label(row: dict[str, Any]) -> str | None:
+    value = row.get("value_normalized")
+    unit = row.get("unit_normalized")
+    if value is not None and unit:
+        return f"{_format_display_number(value)} {unit}"
+    value = row.get("value") if row.get("value") is not None else row.get("raw_value")
+    unit = row.get("unit")
+    if value is not None and unit:
+        return f"{_format_display_number(value)} {unit}"
+    return None
+
+
+def _summary_original_value_label(row: dict[str, Any]) -> str | None:
+    value = row.get("value_original")
+    unit = row.get("unit_original")
+    if value is None:
+        value = row.get("value") if row.get("value") is not None else row.get("raw_value")
+    if not unit:
+        unit = row.get("unit")
+    if value is None or not unit:
+        return None
+    return f"{_format_display_number(value)} {unit}"
+
+
+def _format_display_number(value: Any) -> str:
+    if isinstance(value, int | float):
+        if math.isfinite(float(value)) and abs(float(value) - round(float(value))) < 1e-9:
+            return str(int(round(float(value))))
+        return f"{float(value):.1f}".rstrip("0").rstrip(".")
+    return _clean_public_text(value) or str(value)
+
+
+def _same_display_value(left: str | None, right: str | None) -> bool:
+    if not left or not right:
+        return False
+    return re.sub(r"\s+", " ", left).strip().lower() == re.sub(r"\s+", " ", right).strip().lower()
+
+
+def _fact_basis(row: dict[str, Any]) -> str | None:
+    evidence = row.get("evidence")
+    if isinstance(evidence, list) and evidence:
+        first = next((item for item in evidence if isinstance(item, dict)), None)
+        if first:
+            source = first.get("source_name") or first.get("title") or first.get("filename") or "источник"
+            page = first.get("page") or first.get("page_start")
+            quote = str(first.get("quote") or "").strip()
+            location = f", стр. {page}" if page else ""
+            if quote:
+                return f"{source}{location}: {_shorten(quote, 140)}"
+            return f"{source}{location}"
+    source = row.get("source_name") or row.get("title") or row.get("filename")
+    return str(source) if source else None
+
+
 def _effect_label(effect: Any) -> str | None:
     return {
         "increase": "рост",
@@ -400,3 +753,119 @@ def _effect_label(effect: Any) -> str | None:
         None: None,
         "": None,
     }.get(str(effect), str(effect))
+
+
+def _normalized_value_label(row: dict[str, Any]) -> str | None:
+    value = row.get("value_normalized")
+    unit = row.get("unit_normalized")
+    if value is None or not unit:
+        return None
+    original_unit = row.get("unit_original") or row.get("unit")
+    original_value = row.get("value_original") if row.get("value_original") is not None else row.get("value")
+    if original_unit == unit and original_value == value:
+        return None
+    if isinstance(value, int | float):
+        return f"{value:.1f} {unit}"
+    return f"{value} {unit}"
+
+
+def _conflict_values_label(conflict: dict[str, Any]) -> str:
+    values = conflict.get("values") or []
+    if isinstance(values, dict):
+        values = [values]
+    if isinstance(values, str):
+        values = [values]
+    labels: list[str] = []
+    for item in values:
+        if isinstance(item, dict):
+            label = _conflict_value_item_label(item)
+        else:
+            label = _clean_public_text(item)
+        if label and label not in labels:
+            labels.append(label)
+    return " и ".join(labels[:4])
+
+
+def _conflict_value_item_label(item: dict[str, Any]) -> str:
+    value = item.get("value")
+    unit = item.get("unit")
+    if value is not None and unit:
+        label = f"{_format_display_number(value)} {unit}"
+    else:
+        label = _effect_label(item.get("effect")) or ""
+    original = None
+    if item.get("value_original") is not None and item.get("unit_original"):
+        original = f"{_format_display_number(item.get('value_original'))} {item.get('unit_original')}"
+    if original and not _same_display_value(original, label):
+        label = f"{label} (исходно {original})" if label else original
+    return _clean_public_text(label)
+
+
+def _conflict_reason_label(reason: Any) -> str:
+    value = str(reason or "").strip().lower()
+    mapping = {
+        "values reported in different source units; normalized values are shown for comparison": (
+            "значения приведены в разных исходных единицах и нормализованы для сравнения"
+        ),
+        "sources report different qualitative effects": "источники по-разному описывают качественный эффект",
+        "sources report different numeric values for the same material/regime/property; check source conditions": (
+            "различаются параметры режима, источники или исходное состояние материала"
+        ),
+    }
+    return mapping.get(value, "различаются параметры режима, источники или исходное состояние материала")
+
+
+def _property_for_sentence(value: str) -> str:
+    mapping = {
+        "прочность": "прочности",
+        "предел прочности": "предела прочности",
+        "tensile strength": "прочности",
+        "ultimate tensile strength": "прочности",
+        "коррозионная стойкость": "коррозионной стойкости",
+    }
+    return mapping.get(value.lower(), value)
+
+
+def _regime_for_sentence(value: str) -> str:
+    mapping = {
+        "отжиг": "отжига",
+        "annealing": "отжига",
+        "старение": "старения",
+        "aging": "старения",
+        "термообработка": "термообработки",
+        "heat treatment": "термообработки",
+    }
+    return mapping.get(value.lower(), value)
+
+
+def _clean_public_text(value: Any) -> str:
+    if value is None:
+        return ""
+    text = str(value)
+    text = INTERNAL_ID_RE.sub("", text)
+    replacements = {
+        "PropertyValue": "",
+        "SourceChunk": "источник",
+        "Experiment": "эксперимент",
+        "MEASURES": "",
+        "OF_PROPERTY": "",
+        "STUDIES": "",
+        "USES_REGIME": "",
+        "process_regime:": "режим:",
+        "property:": "свойство:",
+        "value:": "значение:",
+        "unit:": "единица:",
+        "material:": "материал:",
+        "effect:": "эффект:",
+        "conclusion:": "вывод:",
+        "data_gap:": "пробел:",
+    }
+    for raw, replacement in replacements.items():
+        text = text.replace(raw, replacement)
+    text = re.sub(r"\bincreased\b", "повышена", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bdecreased\b", "снижена", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bincrease\b", "рост", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bdecrease\b", "снижение", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bunknown\b", "не указано", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip(" _：:;,.:-")

@@ -32,6 +32,10 @@ def validate_ingest_url(url: str, *, allow_private: bool = False) -> None:
     host = parsed.hostname.lower()
     if host in {"localhost", "localhost.localdomain"}:
         raise UnsafeUrlError("localhost URLs are blocked")
+    if "." not in host:
+        raise UnsafeUrlError("Internal hostnames are blocked")
+    if host.endswith((".localhost", ".local", ".internal", ".lan", ".home", ".corp")):
+        raise UnsafeUrlError("Internal hostnames are blocked")
     if allow_private:
         return
     for address in _resolve_host(host, parsed.port):

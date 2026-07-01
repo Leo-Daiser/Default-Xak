@@ -23,7 +23,9 @@ for _path in (str(_PROJECT_ROOT), str(_PROJECT_PARENT)):
 
 from app.ui_helpers import (  # noqa: E402
     active_document_changes,
+    answer_evidence_summary_rows,
     build_compact_metrics,
+    conflict_explanation_rows,
     diagnostics_to_safe_summary,
     documents_to_rows,
     evidence_to_rows,
@@ -49,13 +51,30 @@ PRESET_TITLE_TO_ID = {
 DEFAULT_PRESET_TITLE = "Лучший ответ"
 DEFAULT_PRESET_ID = PRESET_TITLE_TO_ID[DEFAULT_PRESET_TITLE]
 
-EXAMPLE_QUESTIONS = [
-    "Что делали по сплаву ВТ6 при отжиге и какой был эффект на прочность?",
-    "Что делали по сплаву ВТ6 при криообработке и как изменилась вязкость?",
-    "Что уже делали по ВТ6?",
-    "Сравни ВТ6 и 7075-T6 по прочности.",
-    "Какие пробелы есть по коррозионной стойкости?",
+DEMO_QUESTIONS = [
+    {
+        "question": "Что делали по сплаву ВТ6 при отжиге и какой был эффект на прочность?",
+        "demonstrates": "material + regime + property exact graph query",
+    },
+    {
+        "question": "Сравни ВТ6 и 7075-T6 по прочности.",
+        "demonstrates": "normalized units, comparison, conflict caveat",
+    },
+    {
+        "question": "Какие есть противоречия или неоднородные данные по прочности?",
+        "demonstrates": "conflict detection",
+    },
+    {
+        "question": "Какие пробелы в данных найдены?",
+        "demonstrates": "DataGap",
+    },
+    {
+        "question": "Найди evidence по прочности 7075-T6 после aging.",
+        "demonstrates": "hybrid retrieval + English/Russian terms",
+    },
 ]
+EXAMPLE_QUESTIONS = [item["question"] for item in DEMO_QUESTIONS]
+DEMO_QUESTION_HINTS = {item["question"]: item["demonstrates"] for item in DEMO_QUESTIONS}
 
 
 def api_get(path: str, params: dict[str, Any] | None = None, *, timeout: int = 30) -> dict[str, Any]:
@@ -99,6 +118,19 @@ def _safe_get(path: str, params: dict[str, Any] | None = None, *, default: dict[
         return api_get(path, params=params)
     except Exception as exc:
         return default or {"error": str(exc)}
+
+
+def _response_error_message(response: requests.Response) -> str:
+    try:
+        payload = response.json()
+    except Exception:
+        return response.text
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    if isinstance(detail, dict):
+        return str(detail.get("error") or detail.get("detail") or detail)
+    if isinstance(detail, list):
+        return "; ".join(str(item.get("msg") if isinstance(item, dict) else item) for item in detail)
+    return str(detail or response.text)
 
 
 def _selected_preset_id() -> str:
@@ -263,9 +295,41 @@ def _render_answer(payload: dict[str, Any]) -> None:
         for col, (label, value) in zip(cols, metrics.items()):
             with col:
                 st.metric(label, value)
+    _render_answer_evidence_summary(payload)
+    _render_conflict_explanation(payload)
+
+
+def _render_answer_evidence_summary(payload: dict[str, Any]) -> None:
+    rows = answer_evidence_summary_rows(payload)
+    if not rows:
+        return
+    st.markdown("**Основание ответа**")
+    for row in rows:
+        original = f"\n\n  Исходное значение: {row['Исходное значение']}" if row.get("Исходное значение") else ""
+        st.markdown(
+            f"- **{row['Факт']}**{original}\n\n"
+            f"  Источник: {row['Источник']}\n\n"
+            f"  Фрагмент: \"{row['Фрагмент']}\""
+        )
+
+
+def _render_conflict_explanation(payload: dict[str, Any]) -> None:
+    rows = conflict_explanation_rows(payload)
+    if not rows:
+        return
+    st.markdown("**Неоднородность данных**")
+    for row in rows:
+        st.warning(row["Описание"])
 
 
 def _render_details(payload: dict[str, Any]) -> None:
+    with st.expander("Основание фактов"):
+        rows = evidence_to_user_rows(payload)
+        if rows:
+            _dataframe(rows, empty="")
+        else:
+            st.warning("Для найденных фактов отсутствуют цитаты-источники. Это снижает доверие к ответу.")
+
     with st.expander("Проверенные факты"):
         _dataframe(facts_to_user_rows(payload), empty="Проверенные facts для этого вопроса не найдены.")
         with st.container(border=True):
@@ -340,8 +404,23 @@ def _run_question(question: str, preset_id: str) -> None:
 
 
 def _render_document_controls() -> None:
+    _render_knowledge_growth_summary()
     with st.expander("Документы", expanded=False):
         st.markdown("**Загрузка документов**")
+        with st.container(border=True):
+            st.markdown("**Добавить веб-страницу**")
+            url = st.text_input("URL страницы", placeholder="https://example.org/reports/vt6-annealing.html", key="web_page_url_input")
+            if st.button("Загрузить страницу", key="ingest_web_page_button", disabled=not bool(url.strip())):
+                with st.spinner("Загружаю HTML, разбиваю на chunks и обновляю knowledge graph..."):
+                    response = requests.post(f"{API_BASE}/ingest/url", params={"url": url.strip()}, timeout=160)
+                if response.status_code == 200:
+                    result = response.json()
+                    st.success("Веб-страница загружена.")
+                    _render_ingestion_result(result)
+                else:
+                    st.error(f"Не удалось загрузить страницу: {_response_error_message(response)}")
+
+        st.markdown("**Загрузка файлов**")
         uploaded_files = st.file_uploader(
             "Файлы PDF/DOCX/PPTX/XLSX/CSV/HTML/TXT/MD",
             type=["pdf", "docx", "pptx", "xlsx", "html", "htm", "csv", "txt", "md"],
@@ -423,7 +502,7 @@ def _render_ingestion_result(result: dict[str, Any]) -> None:
         diagnostics = item.get("parser_diagnostics") or {}
         rows.append(
             {
-                "filename": item.get("filename") or item.get("url"),
+                "filename": item.get("source_name") or item.get("filename") or item.get("url"),
                 "status": item.get("status"),
                 "parser": item.get("parser"),
                 "chunks": item.get("chunks"),
@@ -434,6 +513,41 @@ def _render_ingestion_result(result: dict[str, Any]) -> None:
             }
         )
     _dataframe(rows, empty="Нет строк результата ingestion.")
+    expansion_rows = []
+    for item in items or []:
+        expansion = item.get("knowledge_expansion") or {}
+        if not expansion:
+            continue
+        expansion_rows.append(
+            {
+                "Документ": item.get("source_name") or item.get("filename") or item.get("url"),
+                "Новые факты": expansion.get("new_canonical_facts_count", 0),
+                "Объединено дублей": expansion.get("duplicate_facts_count", 0),
+                "Подтверждены факты": expansion.get("corroborated_facts_count", 0),
+                "Конфликты": expansion.get("conflict_groups_added_count", 0),
+                "Новые связи": expansion.get("new_comparison_opportunities_count", 0),
+                "Пробелы": expansion.get("data_gaps_added_count", 0),
+            }
+        )
+    if expansion_rows:
+        st.markdown("**Delta расширения базы знаний**")
+        _dataframe(expansion_rows, empty="Нет изменений knowledge graph.")
+
+
+def _render_knowledge_growth_summary() -> None:
+    summary = _safe_get("/knowledge/summary", default={})
+    if not isinstance(summary, dict) or summary.get("status") != "ok":
+        return
+    with st.container(border=True):
+        st.markdown("**Расширение базы знаний**")
+        col1, col2, col3, col4, col5 = st.columns(5)
+        col1.metric("Активные документы", summary.get("active_documents_count", 0))
+        col2.metric("Canonical facts", summary.get("canonical_facts_count", 0))
+        col3.metric("Новые связи", summary.get("new_connections_count", 0))
+        col4.metric("Конфликты", summary.get("conflict_groups_count", 0))
+        col5.metric("Пробелы данных", summary.get("data_gaps_count", 0))
+        if summary.get("last_ingested_at"):
+            st.caption(f"Последнее обновление: {summary.get('last_ingested_at')}")
 
 
 def _refresh_graph() -> None:
@@ -450,6 +564,8 @@ def _refresh_graph() -> None:
 def _render_question_block(preset_id: str) -> None:
     with st.expander("Примеры вопросов"):
         selected = st.selectbox("Выбрать пример", [""] + EXAMPLE_QUESTIONS)
+        if selected:
+            st.caption(f"Демонстрирует: {DEMO_QUESTION_HINTS.get(selected, 'проверочный сценарий')}")
         if selected and st.button("Подставить пример"):
             st.session_state["question_input"] = selected
     if "question_input" not in st.session_state:
