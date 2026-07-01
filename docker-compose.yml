@@ -32,7 +32,10 @@ services:
     command: ["uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8000"]
     ports:
       - "8000:8000"
+    env_file:
+      - .env
     environment:
+      RUNTIME_PROFILE: ${RUNTIME_PROFILE:-economy_core}
       QDRANT_HOST: qdrant
       QDRANT_PORT: 6333
       QDRANT_COLLECTION: documents
@@ -44,28 +47,6 @@ services:
       DATA_DIR: /data
       METADATA_DB_PATH: /data/outbox.sqlite3
       CATALOG_DB_PATH: /data/catalog.sqlite3
-      DIRECT_QDRANT_PROJECTION: ${DIRECT_QDRANT_PROJECTION:-false}
-      RETRIEVAL_MODE: ${RETRIEVAL_MODE:-bm25}
-      ENABLE_LOCAL_EMBEDDINGS: ${ENABLE_LOCAL_EMBEDDINGS:-false}
-      EAGER_LOCAL_EMBEDDINGS: ${EAGER_LOCAL_EMBEDDINGS:-false}
-      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}
-      RETRIEVAL_QUERY_EXPANSION: ${RETRIEVAL_QUERY_EXPANSION:-true}
-      LLM_ENABLED: ${LLM_ENABLED:-}
-      ENABLE_LLM: ${ENABLE_LLM:-}
-      LLM_PROVIDER: ${LLM_PROVIDER:-auto}
-      LLM_BASE_URL: ${LLM_BASE_URL:-}
-      LLM_MODEL: ${LLM_MODEL:-}
-      LLM_API_KEY: ${LLM_API_KEY:-}
-      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-20}
-      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
-      MISTRAL_BASE_URL: ${MISTRAL_BASE_URL:-https://api.mistral.ai/v1}
-      MISTRAL_MODEL: ${MISTRAL_MODEL:-mistral-small-latest}
-      MISTRAL_TIMEOUT_SECONDS: ${MISTRAL_TIMEOUT_SECONDS:-60}
-      MISTRAL_MAX_TOKENS: ${MISTRAL_MAX_TOKENS:-1200}
-      MISTRAL_TEMPERATURE: ${MISTRAL_TEMPERATURE:-0.2}
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
-      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-}
     volumes:
       - ./data:/data
     restart: unless-stopped

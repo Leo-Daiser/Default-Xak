@@ -12,6 +12,16 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from .runtime.profiles import (
+    bool_from_env_or_profile,
+    profile_default,
+    runtime_profile_from_environment,
+    str_from_env_or_profile,
+)
+
+
+_RUNTIME_PROFILE = runtime_profile_from_environment()
+
 try:  # Pydantic v2 path
     from pydantic_settings import BaseSettings, SettingsConfigDict
     from pydantic import Field
@@ -27,8 +37,9 @@ try:  # Pydantic v2 path
         neo4j_database: str = Field("neo4j", validation_alias="NEO4J_DATABASE")
         kg_backend: str = Field("auto", validation_alias="KG_BACKEND")
 
-        retrieval_mode: str = Field("hybrid", validation_alias="RETRIEVAL_MODE")
-        embedding_model: str = Field("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2", validation_alias="EMBEDDING_MODEL")
+        runtime_profile: str = Field(_RUNTIME_PROFILE, validation_alias="RUNTIME_PROFILE")
+        retrieval_mode: str = Field(profile_default("RETRIEVAL_MODE", "bm25", _RUNTIME_PROFILE), validation_alias="RETRIEVAL_MODE")
+        embedding_model: str = Field(profile_default("EMBEDDING_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2", _RUNTIME_PROFILE), validation_alias="EMBEDDING_MODEL")
         reranker_model: str = Field("BAAI/bge-reranker-v2-m3", validation_alias="RERANKER_MODEL")
 
         chunk_size: int = Field(400, validation_alias="CHUNK_SIZE")
@@ -36,14 +47,14 @@ try:  # Pydantic v2 path
         data_dir: Path = Field(Path("data"), validation_alias="DATA_DIR")
         metadata_db_path: Path = Field(Path("data/outbox.sqlite3"), validation_alias="METADATA_DB_PATH")
         catalog_db_path: Path = Field(Path("data/catalog.sqlite3"), validation_alias="CATALOG_DB_PATH")
-        direct_qdrant_projection: bool = Field(False, validation_alias="DIRECT_QDRANT_PROJECTION")
-        enable_local_embeddings: bool = Field(False, validation_alias="ENABLE_LOCAL_EMBEDDINGS")
-        eager_local_embeddings: bool = Field(False, validation_alias="EAGER_LOCAL_EMBEDDINGS")
-        retrieval_query_expansion: bool = Field(True, validation_alias="RETRIEVAL_QUERY_EXPANSION")
+        direct_qdrant_projection: bool = Field(profile_default("DIRECT_QDRANT_PROJECTION", False, _RUNTIME_PROFILE), validation_alias="DIRECT_QDRANT_PROJECTION")
+        enable_local_embeddings: bool = Field(profile_default("ENABLE_LOCAL_EMBEDDINGS", False, _RUNTIME_PROFILE), validation_alias="ENABLE_LOCAL_EMBEDDINGS")
+        eager_local_embeddings: bool = Field(profile_default("EAGER_LOCAL_EMBEDDINGS", False, _RUNTIME_PROFILE), validation_alias="EAGER_LOCAL_EMBEDDINGS")
+        retrieval_query_expansion: bool = Field(profile_default("RETRIEVAL_QUERY_EXPANSION", True, _RUNTIME_PROFILE), validation_alias="RETRIEVAL_QUERY_EXPANSION")
 
-        extraction_mode: str = Field("deterministic", validation_alias="EXTRACTION_MODE")
+        extraction_mode: str = Field(profile_default("EXTRACTION_MODE", "deterministic", _RUNTIME_PROFILE), validation_alias="EXTRACTION_MODE")
         extraction_min_confidence: float = Field(0.55, validation_alias="EXTRACTION_MIN_CONFIDENCE")
-        extraction_enable_llm: bool = Field(False, validation_alias="EXTRACTION_ENABLE_LLM")
+        extraction_enable_llm: bool = Field(profile_default("EXTRACTION_ENABLE_LLM", False, _RUNTIME_PROFILE), validation_alias="EXTRACTION_ENABLE_LLM")
         extraction_on_ingest: bool = Field(False, validation_alias="EXTRACTION_ON_INGEST")
         extraction_audit_dir: Path = Field(Path("data/extraction_audit"), validation_alias="EXTRACTION_AUDIT_DIR")
 
@@ -57,10 +68,10 @@ try:  # Pydantic v2 path
         analytics_max_sources: int = Field(12, validation_alias="ANALYTICS_MAX_SOURCES")
         analytics_max_graph_nodes: int = Field(50, validation_alias="ANALYTICS_MAX_GRAPH_NODES")
         analytics_max_graph_edges: int = Field(80, validation_alias="ANALYTICS_MAX_GRAPH_EDGES")
-        answer_synthesis_mode: str = Field("template", validation_alias="ANSWER_SYNTHESIS_MODE")
+        answer_synthesis_mode: str = Field(profile_default("ANSWER_SYNTHESIS_MODE", "template", _RUNTIME_PROFILE), validation_alias="ANSWER_SYNTHESIS_MODE")
 
-        enable_llm: bool = Field(False, validation_alias="ENABLE_LLM")
-        llm_provider: str = Field("none", validation_alias="LLM_PROVIDER")
+        enable_llm: bool = Field(profile_default("ENABLE_LLM", False, _RUNTIME_PROFILE), validation_alias="ENABLE_LLM")
+        llm_provider: str = Field(profile_default("LLM_PROVIDER", "offline", _RUNTIME_PROFILE), validation_alias="LLM_PROVIDER")
         llm_base_url: str = Field("http://localhost:11434", validation_alias="LLM_BASE_URL")
         llm_model: str = Field("qwen2.5:7b-instruct", validation_alias="LLM_MODEL")
         llm_api_key: str = Field("", validation_alias="LLM_API_KEY")
@@ -101,8 +112,9 @@ except Exception:  # pragma: no cover - fallback for very small environments
         neo4j_database: str = os.getenv("NEO4J_DATABASE", "neo4j")
         kg_backend: str = os.getenv("KG_BACKEND", "auto")
 
-        retrieval_mode: str = os.getenv("RETRIEVAL_MODE", "hybrid")
-        embedding_model: str = os.getenv("EMBEDDING_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+        runtime_profile: str = _RUNTIME_PROFILE
+        retrieval_mode: str = str_from_env_or_profile("RETRIEVAL_MODE", "bm25", _RUNTIME_PROFILE)
+        embedding_model: str = str_from_env_or_profile("EMBEDDING_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2", _RUNTIME_PROFILE)
         reranker_model: str = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
 
         chunk_size: int = int(os.getenv("CHUNK_SIZE", "400"))
@@ -110,14 +122,14 @@ except Exception:  # pragma: no cover - fallback for very small environments
         data_dir: Path = Path(os.getenv("DATA_DIR", "data"))
         metadata_db_path: Path = Path(os.getenv("METADATA_DB_PATH", "data/outbox.sqlite3"))
         catalog_db_path: Path = Path(os.getenv("CATALOG_DB_PATH", "data/catalog.sqlite3"))
-        direct_qdrant_projection: bool = os.getenv("DIRECT_QDRANT_PROJECTION", "false").lower() in {"1", "true", "yes"}
-        enable_local_embeddings: bool = os.getenv("ENABLE_LOCAL_EMBEDDINGS", "false").lower() in {"1", "true", "yes"}
-        eager_local_embeddings: bool = os.getenv("EAGER_LOCAL_EMBEDDINGS", "false").lower() in {"1", "true", "yes"}
-        retrieval_query_expansion: bool = os.getenv("RETRIEVAL_QUERY_EXPANSION", "true").lower() in {"1", "true", "yes"}
+        direct_qdrant_projection: bool = bool_from_env_or_profile("DIRECT_QDRANT_PROJECTION", False, _RUNTIME_PROFILE)
+        enable_local_embeddings: bool = bool_from_env_or_profile("ENABLE_LOCAL_EMBEDDINGS", False, _RUNTIME_PROFILE)
+        eager_local_embeddings: bool = bool_from_env_or_profile("EAGER_LOCAL_EMBEDDINGS", False, _RUNTIME_PROFILE)
+        retrieval_query_expansion: bool = bool_from_env_or_profile("RETRIEVAL_QUERY_EXPANSION", True, _RUNTIME_PROFILE)
 
-        extraction_mode: str = os.getenv("EXTRACTION_MODE", "deterministic")
+        extraction_mode: str = str_from_env_or_profile("EXTRACTION_MODE", "deterministic", _RUNTIME_PROFILE)
         extraction_min_confidence: float = float(os.getenv("EXTRACTION_MIN_CONFIDENCE", "0.55"))
-        extraction_enable_llm: bool = os.getenv("EXTRACTION_ENABLE_LLM", "false").lower() in {"1", "true", "yes"}
+        extraction_enable_llm: bool = bool_from_env_or_profile("EXTRACTION_ENABLE_LLM", False, _RUNTIME_PROFILE)
         extraction_on_ingest: bool = os.getenv("EXTRACTION_ON_INGEST", "false").lower() in {"1", "true", "yes"}
         extraction_audit_dir: Path = Path(os.getenv("EXTRACTION_AUDIT_DIR", "data/extraction_audit"))
 
@@ -131,10 +143,10 @@ except Exception:  # pragma: no cover - fallback for very small environments
         analytics_max_sources: int = int(os.getenv("ANALYTICS_MAX_SOURCES", "12"))
         analytics_max_graph_nodes: int = int(os.getenv("ANALYTICS_MAX_GRAPH_NODES", "50"))
         analytics_max_graph_edges: int = int(os.getenv("ANALYTICS_MAX_GRAPH_EDGES", "80"))
-        answer_synthesis_mode: str = os.getenv("ANSWER_SYNTHESIS_MODE", "template")
+        answer_synthesis_mode: str = str_from_env_or_profile("ANSWER_SYNTHESIS_MODE", "template", _RUNTIME_PROFILE)
 
-        enable_llm: bool = os.getenv("ENABLE_LLM", "false").lower() in {"1", "true", "yes"}
-        llm_provider: str = os.getenv("LLM_PROVIDER", "none")
+        enable_llm: bool = bool_from_env_or_profile("ENABLE_LLM", False, _RUNTIME_PROFILE)
+        llm_provider: str = str_from_env_or_profile("LLM_PROVIDER", "offline", _RUNTIME_PROFILE)
         llm_base_url: str = os.getenv("LLM_BASE_URL", "http://localhost:11434")
         llm_model: str = os.getenv("LLM_MODEL", "qwen2.5:7b-instruct")
         llm_api_key: str = os.getenv("LLM_API_KEY", "")

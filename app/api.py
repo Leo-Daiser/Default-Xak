@@ -38,6 +38,7 @@ from .models.schemas import Chunk, Document
 from .retrieval.graph_retriever import GraphRetriever
 from .retrieval.query_planner import QueryPlanner
 from .retrieval.retrieval import RetrievalEngine
+from .runtime.profiles import runtime_profile_summary
 from .runtime.presets import RuntimePresetId, get_runtime_preset, list_runtime_presets, preset_diagnostics
 from .security.url_safety import UnsafeUrlError, fetch_url_safely
 from .storage.catalog import SQLiteCatalog
@@ -861,6 +862,8 @@ async def health():
     llm_status = llm_client.status()
     return {
         "status": "ok",
+        "runtime_profile": getattr(settings, "runtime_profile", "economy_core"),
+        "runtime_profile_summary": runtime_profile_summary(settings),
         "graph": "neo4j" if active_graph is not None else "disabled",
         **kg_status,
         **extraction_status,
@@ -3264,7 +3267,10 @@ def _decorate_ask_response(
             "preset_title": preset.title,
             "effective_runtime_mode": runtime_diag["effective_runtime_mode"],
         }
-    return enhance_answer_payload(payload, preset.preset_id)
+    repairer = None
+    if preset.answer_synthesis_mode in {"hybrid", "llm"} and not preset.strict_audit_mode:
+        repairer = getattr(llm_client, "repair_grounded_answer", None)
+    return enhance_answer_payload(payload, preset.preset_id, llm_repairer=repairer)
 
 
 @app.post("/ask")

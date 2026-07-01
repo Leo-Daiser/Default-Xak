@@ -49,3 +49,17 @@ def test_streamlit_ask_api_posts_json_body_with_selected_preset(monkeypatch) -> 
     assert captured["path"] == "/ask"
     assert captured["json_body"]["preset_id"] == "strict_audit"
     assert captured["json_body"]["question"] == "Что уже делали по ВТ6?"
+
+
+def test_streamlit_demo_questions_cover_demo_strengths() -> None:
+    assert ui.EXAMPLE_QUESTIONS == [
+        "Что делали по сплаву ВТ6 при отжиге и какой был эффект на прочность?",
+        "Сравни ВТ6 и 7075-T6 по прочности.",
+        "Какие есть противоречия или неоднородные данные по прочности?",
+        "Какие пробелы в данных найдены?",
+        "Найди evidence по прочности 7075-T6 после aging.",
+    ]
+
+    hints = " ".join(ui.DEMO_QUESTION_HINTS.values())
+    for expected in ["exact graph query", "normalized units", "conflict detection", "DataGap", "hybrid retrieval"]:
+        assert expected in hints

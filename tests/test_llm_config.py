@@ -54,18 +54,14 @@ def test_docker_compose_passes_mistral_env_to_api_service() -> None:
     compose = Path("docker-compose.yml").read_text(encoding="utf-8")
 
     assert "working_dir: /code/hackathon_project" in compose
+    assert "env_file:" in compose
+    assert "- .env" in compose
+    assert "RUNTIME_PROFILE: ${RUNTIME_PROFILE:-economy_core}" in compose
     assert "NEO4J_URI: ${NEO4J_DOCKER_URI:-bolt://neo4j:7687}" in compose
-    assert "LLM_PROVIDER: ${LLM_PROVIDER:-auto}" in compose
     assert "LLM_PROVIDER: none" not in compose
     for name in [
-        "MISTRAL_API_KEY",
-        "MISTRAL_BASE_URL",
-        "MISTRAL_MODEL",
-        "MISTRAL_TIMEOUT_SECONDS",
-        "MISTRAL_MAX_TOKENS",
-        "MISTRAL_TEMPERATURE",
-        "OPENROUTER_API_KEY",
-        "OPENROUTER_BASE_URL",
-        "OPENROUTER_MODEL",
+        "MISTRAL_API_KEY:",
+        "OPENROUTER_API_KEY:",
+        "LLM_API_KEY:",
     ]:
-        assert f"{name}:" in compose
+        assert name not in compose

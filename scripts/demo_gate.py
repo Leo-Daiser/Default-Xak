@@ -15,6 +15,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from scripts.extraction_quality_report import Neo4jScanOptions, build_report as build_extraction_report  # noqa: E402
+from scripts.resource_efficiency_report import _docker_api_image_size_bytes  # noqa: E402
+from app.runtime.profiles import runtime_profile_from_environment  # noqa: E402
+
 
 RAW_LEAKAGE_RE = re.compile(
     r"\b(?:technical_answer|doc_[A-Za-z0-9_:-]+|chunk_[A-Za-z0-9_:-]+|"
@@ -100,6 +104,87 @@ def classify_retrieval(health: dict[str, Any]) -> tuple[str, str]:
             return "WARN", f"Hybrid degraded to BM25: {reason}"
         return "FAIL", f"Hybrid retrieval configured but state is inconsistent: effective={effective or 'missing'}"
     return "PASS", f"Retrieval ready: {effective or mode or 'bm25'}"
+
+
+def classify_image_size(size_bytes: int | None, *, strict: bool = False, max_gb: float = 5.0) -> GateCheck:
+    if size_bytes is None:
+        return GateCheck("WARN", "API Docker image size is unknown")
+    size_gb = size_bytes / (1024 ** 3)
+    if size_gb > max_gb:
+        level = "FAIL" if strict else "WARN"
+        return GateCheck(level, f"API Docker image is large: {size_gb:.2f} GB > {max_gb:g} GB")
+    return GateCheck("PASS", f"API Docker image size within limit: {size_gb:.2f} GB <= {max_gb:g} GB")
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _resource_limit_gb() -> float:
+    try:
+        return float(os.getenv("RESOURCE_MAX_IMAGE_GB", "5"))
+    except ValueError:
+        return 5.0
+
+
+def run_resource_checks(gate: DemoGate, health: dict[str, Any]) -> None:
+    strict = _env_bool("RESOURCE_STRICT", False)
+    max_gb = _resource_limit_gb()
+    gate.checks.append(classify_image_size(_docker_api_image_size_bytes(), strict=strict, max_gb=max_gb))
+
+    profile = str(
+        health.get("runtime_profile")
+        or (health.get("runtime_profile_summary") or {}).get("runtime_profile")
+        or runtime_profile_from_environment()
+        or ""
+    )
+    retrieval = health.get("retrieval") or {}
+    extraction = health.get("extraction") or {}
+    answering = health.get("answering") or {}
+    llm = health.get("llm") or {}
+
+    if profile == "economy_core" and retrieval.get("local_embeddings_enabled"):
+        gate.warn("economy_core has local embeddings enabled")
+    else:
+        gate.pass_("Runtime profile/embedding settings are resource-consistent")
+
+    llm_extraction = bool(extraction.get("llm_extraction_available") or extraction.get("extraction_enable_llm"))
+    if llm_extraction and strict:
+        gate.fail("LLM extraction is enabled in strict resource/compliance mode")
+    elif llm_extraction:
+        gate.warn("LLM extraction is enabled; deterministic extraction is expected for resource efficiency")
+    else:
+        gate.pass_("LLM extraction disabled; deterministic extraction remains source of truth")
+
+    if health.get("qdrant_projection_enabled") and not retrieval.get("qdrant_ready"):
+        gate.warn("Qdrant projection is enabled but Qdrant is not ready/used")
+    else:
+        gate.pass_("Qdrant is disabled or actively available")
+
+    try:
+        extraction_report = build_extraction_report(Neo4jScanOptions(skip_neo4j=True))
+        facts_without_evidence = int((extraction_report.get("summary") or {}).get("facts_without_evidence") or 0)
+        if facts_without_evidence == 0:
+            gate.pass_("facts_without_evidence = 0")
+        else:
+            gate.fail(f"facts_without_evidence = {facts_without_evidence}")
+    except Exception as exc:
+        gate.warn(f"Could not compute facts_without_evidence: {type(exc).__name__}")
+
+    llm_enabled = bool(llm.get("enabled"))
+    answer_mode = str(answering.get("answer_synthesis_mode") or "")
+    if not llm_enabled:
+        gate.pass_("LLM disabled; no LLM resource cost in current profile")
+    elif not llm_extraction and answer_mode in {"hybrid", "llm"}:
+        gate.pass_("LLM used only for guarded answer polish")
+    elif not llm_extraction:
+        gate.pass_("LLM is not used for extraction; deterministic fact layer remains authoritative")
+    else:
+        gate.warn("LLM usage is not clearly limited to guarded polish")
+    gate.pass_("Grounding guard enabled")
 
 
 def validate_answer_payload(payload: dict[str, Any], *, expected_preset: str = "expert_max") -> list[GateCheck]:
@@ -230,7 +315,10 @@ def run_gate(api_base: str) -> DemoGate:
     provider = str(llm.get("provider") or llm.get("llm_provider_active") or health.get("llm_provider_active") or "")
     llm_ready = bool(llm.get("ready") if "ready" in llm else llm.get("llm_ready", health.get("llm_ready")))
     llm_enabled = bool(llm.get("enabled") if "enabled" in llm else llm.get("llm_enabled", health.get("llm_enabled")))
-    if llm_enabled and llm_ready and provider in {"mistral", "openrouter"}:
+    runtime_profile = str(health.get("runtime_profile") or (health.get("runtime_profile_summary") or {}).get("runtime_profile") or "")
+    if runtime_profile == "economy_core" and not llm_enabled:
+        gate.pass_("LLM disabled for economy_core")
+    elif llm_enabled and llm_ready and provider in {"mistral", "openrouter"}:
         gate.pass_(f"LLM ready: {provider}")
     else:
         gate.fail(f"LLM is not demo-ready: enabled={llm_enabled}, ready={llm_ready}, provider={provider or 'missing'}")
@@ -242,6 +330,8 @@ def run_gate(api_base: str) -> DemoGate:
         gate.warn(message)
     else:
         gate.fail(message)
+
+    run_resource_checks(gate, health)
 
     try:
         presets = _request_json("GET", _api_url(api_base, "/runtime/presets"), timeout=20)

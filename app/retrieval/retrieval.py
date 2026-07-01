@@ -409,6 +409,7 @@ class RetrievalEngine:
             "embedding_dependency_available": dependency_available,
             "embedding_model_loaded": self._embedding_model is not None,
             "embedding_model": settings.embedding_model,
+            "embedding_dimension": self._embedding_dimension(),
             "embedding_last_error": self._last_embedding_error,
             "direct_qdrant_projection": settings.direct_qdrant_projection,
             "local_embeddings_enabled": local_enabled,
@@ -442,6 +443,18 @@ class RetrievalEngine:
         if self._last_qdrant_error:
             return self._last_qdrant_error
         return "dense retrieval not ready"
+
+    def _embedding_dimension(self) -> int | None:
+        if self._local_embeddings:
+            first = next(iter(self._local_embeddings.values()), None)
+            if isinstance(first, list):
+                return len(first)
+        if self._embedding_model is not None and hasattr(self._embedding_model, "get_sentence_embedding_dimension"):
+            try:
+                return int(self._embedding_model.get_sentence_embedding_dimension())
+            except Exception:
+                return None
+        return None
 
     def _rrf_fusion(
         self,

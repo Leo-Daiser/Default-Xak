@@ -98,3 +98,48 @@ def test_demo_regression_validate_case_catches_offline_and_raw_leakage() -> None
     assert result["passed"] is False
     assert result["raw_leaks_count"] >= 1
     assert any("offline" in reason.lower() or "preset" in reason.lower() for reason in result["reasons"])
+
+
+def test_demo_regression_validate_case_reports_guard_stats() -> None:
+    case = DEMO_CASES[1]
+    payload = {
+        "status": "ok",
+        "answer_mode": "comparison",
+        "answer": (
+            "ВТ6 и 7075-T6 сравнены в MPa. Сравнение ограничено: разные режимы и источники. "
+            "Исходное значение 77 ksi ≈ 531 MPa."
+        ),
+        "diagnostics": {
+            "preset_id": "expert_max",
+            "llm_answer_polished": True,
+            "llm_grounding_guard": {
+                "status": "repaired",
+                "repair_attempted": True,
+                "repair_passed": True,
+                "violations_count": 2,
+                "repaired_violations_count": 0,
+            },
+        },
+        "constraints": {"materials": ["ВТ6", "7075-T6"], "properties": ["прочность"]},
+        "facts": [
+            {"material": "ВТ6", "regime": "отжиг", "property": "прочность", "value": 980, "unit": "MPa"},
+            {
+                "material": "7075-T6",
+                "regime": "старение",
+                "property": "прочность",
+                "value": 77,
+                "unit": "ksi",
+                "value_normalized": 530.9,
+                "unit_normalized": "MPa",
+            },
+        ],
+        "evidence": [],
+        "subgraph": {"nodes": [], "edges": []},
+    }
+
+    result = validate_case(case, payload)
+
+    assert result["llm_grounding_guard_status"] == "repaired"
+    assert result["guard_repair_attempted"] is True
+    assert result["guard_fallback_used"] is False
+    assert result["guard_violations_count"] == 2

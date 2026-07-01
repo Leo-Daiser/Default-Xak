@@ -40,3 +40,19 @@ def test_comparison_answer_hides_raw_technical_terms() -> None:
     for forbidden in ["technical_answer", "increase", "decrease", "unknown", "прочность=77.0 ksi", "doc_", "chunk_", "EXP-", "SCI-"]:
         assert forbidden not in answer
     assert payload["technical_answer"].startswith("technical_answer:")
+
+
+def test_conflict_summary_is_visible_without_raw_ids() -> None:
+    payload = _comparison_payload()
+    payload["facts"][0]["evidence"] = [{"document_id": "doc_secret", "chunk_id": "chunk_secret", "quote": "ВТ6 1120 MPa"}]
+    payload["facts"][1]["evidence"] = [{"document_id": "doc_secret", "chunk_id": "chunk_other", "quote": "ВТ6 980 MPa"}]
+
+    enhanced = enhance_answer_payload(payload, "expert_max")
+    answer = enhanced["answer"]
+
+    assert "В корпусе найдены разные значения прочности для ВТ6 после отжига" in answer
+    assert "980 MPa" in answer
+    assert "1120 MPa" in answer
+    for forbidden in ["doc_secret", "chunk_secret", "chunk_other", "EXP-", "SCI-", "increase", "decrease", "unknown"]:
+        assert forbidden not in answer
+    assert enhanced["diagnostics"]["fact_conflicts"]

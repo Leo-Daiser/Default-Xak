@@ -14,6 +14,22 @@ class FakeSession:
         return []
 
 
+class BackfillSession(FakeSession):
+    def run(self, query: str, **params):
+        self.calls.append((query, params))
+        if "RETURN meas.measurement_id AS measurement_id" in query:
+            return [
+                {
+                    "measurement_id": "legacy-m1",
+                    "value": 77.0,
+                    "raw_value": "77",
+                    "unit": "ksi",
+                    "property": "прочность",
+                }
+            ]
+        return []
+
+
 class FakeGraphDB:
     def __init__(self, session: FakeSession) -> None:
         self._session = session
@@ -71,3 +87,34 @@ def test_writer_uses_merge_and_stable_ids() -> None:
     measurement_ids = [params["measurement_id"] for _, params in session.calls if "measurement_id" in params]
     assert len(set(measurement_ids)) == 1
 
+
+def test_writer_persists_normalized_measurement_fields() -> None:
+    session = FakeSession()
+    writer = GraphWriter(FakeGraphDB(session))  # type: ignore[arg-type]
+    stats = GraphWriteStats()
+
+    writer.write_experiment(session, _fact(), stats)
+
+    measurement_params = next(params for _, params in session.calls if "measurement_id" in params and "value_normalized" in params)
+    assert measurement_params["value_original"] == 1120.0
+    assert measurement_params["unit_original"] == "MPa"
+    assert measurement_params["value_normalized"] == 1120.0
+    assert measurement_params["unit_normalized"] == "MPa"
+    assert measurement_params["normalization_family"] == "strength"
+
+
+def test_writer_backfills_legacy_normalized_measurement_fields() -> None:
+    session = BackfillSession()
+    writer = GraphWriter(FakeGraphDB(session))  # type: ignore[arg-type]
+    stats = GraphWriteStats()
+
+    writer.backfill_normalized_measurements(session, stats)
+
+    update_params = next(params for query, params in session.calls if "MATCH (meas:Measurement {measurement_id: $measurement_id})" in query)
+    assert update_params["measurement_id"] == "legacy-m1"
+    assert update_params["value_original"] == 77.0
+    assert update_params["unit_original"] == "ksi"
+    assert abs(update_params["value_normalized"] - 530.896289) < 0.001
+    assert update_params["unit_normalized"] == "MPa"
+    assert update_params["normalization_family"] == "strength"
+    assert stats.normalized_measurements_backfilled == 1

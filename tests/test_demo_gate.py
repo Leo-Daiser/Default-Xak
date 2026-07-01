@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from scripts.demo_gate import (
     DemoGate,
+    classify_image_size,
     classify_retrieval,
     contains_raw_leakage,
     validate_answer_graph,
@@ -67,6 +68,16 @@ def test_demo_gate_summary_fails_only_on_failures() -> None:
     gate.fail("LLM is not ready")
     assert gate.failed is True
     assert "SUMMARY: FAIL" in gate.render()
+
+
+def test_demo_gate_large_image_warns_unless_resource_strict() -> None:
+    six_gb = 6 * 1024 ** 3
+
+    relaxed = classify_image_size(six_gb, strict=False, max_gb=5)
+    strict = classify_image_size(six_gb, strict=True, max_gb=5)
+
+    assert relaxed.level == "WARN"
+    assert strict.level == "FAIL"
 
 
 def test_demo_gate_validates_answer_graph_contract() -> None:

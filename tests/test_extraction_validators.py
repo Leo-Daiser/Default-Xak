@@ -63,6 +63,7 @@ def test_low_confidence_experiment_rejected() -> None:
 
 def test_units_normalize() -> None:
     assert resolve_unit("МПа") == "MPa"
+    assert resolve_unit("ksi") == "ksi"
     assert resolve_unit("°С") == "C"
     assert resolve_unit("ч") == "h"
     assert resolve_unit("мин") == "min"
