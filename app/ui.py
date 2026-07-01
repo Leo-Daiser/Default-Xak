@@ -33,12 +33,14 @@ from app.ui_helpers import (  # noqa: E402
     facts_to_rows,
     facts_to_user_rows,
     format_answer_markdown,
-    graph_to_display,
-    graph_to_interactive_html,
     no_exact_match_warning,
-    subgraph_to_tables,
 )
 from app.graph.answer_graph import answer_graph_to_html, build_answer_graph  # noqa: E402
+from app.graph.full_answer_graph import (  # noqa: E402
+    build_full_answer_graph,
+    full_answer_graph_to_html,
+    full_graph_audit_tables,
+)
 
 
 API_BASE = os.getenv("API_BASE", "http://localhost:8000")
@@ -177,6 +179,27 @@ def _close_answer_graph_modal(answer_key: str) -> None:
     st.session_state[_answer_graph_modal_state_key(answer_key)] = False
 
 
+def _full_graph_modal_state_key(answer_key: str) -> str:
+    return f"full_graph_modal_open_{answer_key}"
+
+
+def _ensure_full_graph_modal_state(answer_key: str) -> str:
+    state_key = _full_graph_modal_state_key(answer_key)
+    st.session_state.setdefault("full_graph_modal_open", False)
+    st.session_state.setdefault(state_key, False)
+    return state_key
+
+
+def _open_full_graph_modal(answer_key: str) -> None:
+    st.session_state["full_graph_modal_open"] = True
+    st.session_state[_full_graph_modal_state_key(answer_key)] = True
+
+
+def _close_full_graph_modal(answer_key: str) -> None:
+    st.session_state["full_graph_modal_open"] = False
+    st.session_state[_full_graph_modal_state_key(answer_key)] = False
+
+
 def _render_graph_header(answer_key: str) -> None:
     _ensure_answer_graph_modal_state(answer_key)
     title_col, action_col = st.columns([0.58, 0.42], vertical_alignment="center")
@@ -200,12 +223,121 @@ def _render_interactive_graph(payload: dict[str, Any], answer_graph: Any, answer
     )
     if st.session_state.get(_answer_graph_modal_state_key(answer_key)):
         _render_large_answer_graph(answer_graph, answer_key)
-    with st.expander("Технический подграф"):
-        st.caption("Raw subgraph для аудита. Основная карта выше агрегирует только смысловую цепочку ответа.")
-        components.html(graph_to_interactive_html(graph_to_display(payload), max_nodes=20, max_edges=30), height=420, scrolling=False)
-        nodes, edges = subgraph_to_tables(graph_to_display(payload))
+
+
+def _full_graph_filters(answer_key: str) -> dict[str, bool]:
+    cols = st.columns(5)
+    with cols[0]:
+        show_sources = st.checkbox("Источники/evidence", value=True, key=f"full_graph_show_sources_{answer_key}")
+    with cols[1]:
+        show_gaps = st.checkbox("Пробелы данных", value=True, key=f"full_graph_show_gaps_{answer_key}")
+    with cols[2]:
+        show_conflicts = st.checkbox("Конфликты", value=True, key=f"full_graph_show_conflicts_{answer_key}")
+    with cols[3]:
+        show_measurements = st.checkbox("Измерения", value=True, key=f"full_graph_show_measurements_{answer_key}")
+    with cols[4]:
+        active_only = st.checkbox("Только активные", value=True, key=f"full_graph_active_only_{answer_key}")
+    return {
+        "show_sources": show_sources,
+        "show_gaps": show_gaps,
+        "show_conflicts": show_conflicts,
+        "show_measurements": show_measurements,
+        "active_only": active_only,
+    }
+
+
+def _render_full_graph(payload: dict[str, Any], answer_key: str) -> None:
+    _ensure_full_graph_modal_state(answer_key)
+    st.divider()
+    title_col, action_col = st.columns([0.56, 0.44], vertical_alignment="center")
+    with title_col:
+        st.subheader("Карта происхождения ответа")
+        st.caption(
+            "Показывает, какие сущности, факты и источники сформировали ответ. "
+            "Дубли объединены, технические идентификаторы доступны в аудите."
+        )
+    with action_col:
+        st.button(
+            "Развернуть карту происхождения",
+            key=f"open_full_graph_modal_{answer_key}",
+            on_click=_open_full_graph_modal,
+            args=(answer_key,),
+            use_container_width=True,
+        )
+    filters = _full_graph_filters(answer_key)
+    full_graph = build_full_answer_graph(payload, filters=filters)
+    components.html(
+        full_answer_graph_to_html(
+            full_graph,
+            render_height=620,
+            render_width=1200,
+            container_id=f"fullAnswerGraphCompact_{answer_key}",
+        ),
+        height=660,
+        scrolling=False,
+    )
+    stats = full_graph.stats
+    if stats.get("truncated"):
+        st.caption(
+            "Показаны ключевые связи ответа. Полные raw-данные доступны в аудите."
+        )
+    if st.session_state.get(_full_graph_modal_state_key(answer_key)):
+        _render_large_full_graph(full_graph, answer_key)
+    with st.expander("Аудит графа"):
+        st.caption("Экспертный режим проверки: canvas выше показывает readable карту; здесь доступны исходные identifiers и relation labels.")
+        nodes, edges = full_graph_audit_tables(payload, full_graph)
+        st.markdown("**Аудит узлов**")
         _dataframe(nodes, empty="Nodes отсутствуют.")
+        st.markdown("**Аудит связей**")
         _dataframe(edges, empty="Edges отсутствуют.")
+
+
+def _render_large_full_graph(full_graph: Any, answer_key: str) -> None:
+    dialog = getattr(st, "dialog", None)
+    if dialog is not None:
+        try:
+            decorator = dialog("Карта происхождения ответа", width="large")
+        except TypeError:
+            decorator = dialog("Карта происхождения ответа")
+
+        @decorator
+        def _large_full_graph_dialog() -> None:
+            _render_answer_graph_modal_css()
+            _, close_col = st.columns([0.9, 0.1])
+            with close_col:
+                if st.button("×", key=f"close_full_graph_modal_{answer_key}", help="Закрыть"):
+                    _close_full_graph_modal(answer_key)
+                    st.rerun()
+            components.html(
+                full_answer_graph_to_html(
+                    full_graph,
+                    render_height=820,
+                    render_width=1500,
+                    container_id=f"fullAnswerGraphExpanded_{answer_key}",
+                ),
+                height=860,
+                scrolling=False,
+            )
+
+        _large_full_graph_dialog()
+        return
+
+    with st.container(border=True):
+        close_col, _ = st.columns([0.2, 0.8])
+        with close_col:
+            if st.button("Закрыть", key=f"close_full_graph_modal_inline_{answer_key}"):
+                _close_full_graph_modal(answer_key)
+                st.rerun()
+        components.html(
+            full_answer_graph_to_html(
+                full_graph,
+                render_height=820,
+                render_width=1500,
+                container_id=f"fullAnswerGraphExpanded_{answer_key}",
+            ),
+            height=860,
+            scrolling=False,
+        )
 
 
 def _render_answer_graph_modal_css() -> None:
@@ -396,11 +528,13 @@ def _run_question(question: str, preset_id: str) -> None:
         except Exception as exc:
             st.error(f"Ошибка /ask: {exc}")
             return
+    payload.setdefault("question", question.strip())
     st.session_state["last_question"] = question.strip()
     st.session_state["last_request_payload"] = request_payload
     st.session_state["last_selected_preset_from_ui"] = preset_id
     st.session_state["last_answer_payload"] = payload
     st.session_state["answer_graph_modal_open"] = False
+    st.session_state["full_graph_modal_open"] = False
 
 
 def _render_document_controls() -> None:
@@ -630,6 +764,7 @@ def main() -> None:
         answer_key = _answer_graph_key(payload)
         _render_graph_header(answer_key)
         _render_interactive_graph(payload, answer_graph, answer_key)
+        _render_full_graph(payload, answer_key)
     _render_details(payload)
 
 

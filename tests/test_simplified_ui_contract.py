@@ -34,5 +34,7 @@ def test_ui_contains_product_controls() -> None:
 
 def test_ui_uses_interactive_graph_renderer() -> None:
     text = Path("app/ui.py").read_text(encoding="utf-8")
-    assert "graph_to_interactive_html" in text
+    assert "answer_graph_to_html" in text
     assert "components.html" in text
+    assert "Аудит графа" in text
+    assert "graph_to_interactive_html" not in text

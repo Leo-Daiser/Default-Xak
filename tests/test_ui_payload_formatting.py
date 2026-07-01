@@ -215,6 +215,15 @@ def test_friendly_source_name_hides_demo_technical_tokens() -> None:
     )
     assert friendly_source_name("article_vt6.txt") == "Статья по ВТ6"
     assert friendly_source_name("ti6al4v.html") == "Материал по Ti-6Al-4V"
+    assert friendly_source_name(
+        "https://example.org/reports/vt6-annealing.html?utm_source=demo",
+        source_type="url",
+    ) == "example.org · vt6 annealing"
+    assert friendly_source_name(
+        "VT6 annealing study",
+        source_type="url",
+        source_url="https://example.org/reports/vt6-annealing.html?utm_source=demo",
+    ) == "VT6 annealing study"
     assert friendly_source_name("source_technical_name.txt") == "Источник из корпуса"
     rendered = " ".join(
         [
@@ -246,3 +255,23 @@ def test_raw_source_provenance_stays_available_in_raw_rows() -> None:
     assert raw_rows[0]["doc_id"] == "doc_abc"
     assert raw_rows[0]["chunk_id"] == "chunk_abc"
     assert user_rows[0]["Источник"] == "Данные по термообработке ВТ6"
+
+
+def test_url_source_keeps_raw_url_only_in_raw_rows() -> None:
+    payload = {
+        "evidence": [
+            {
+                "source_name": "VT6 annealing study",
+                "source_type": "url",
+                "source_url": "https://example.org/reports/vt6-annealing.html?utm_source=demo",
+                "quote": "После отжига сплава ВТ6 предел прочности составил 980 MPa.",
+            }
+        ]
+    }
+
+    raw_rows = evidence_to_rows(payload)
+    user_rows = evidence_to_user_rows(payload)
+
+    assert raw_rows[0]["source_url"].endswith("utm_source=demo")
+    assert user_rows[0]["Источник"] == "VT6 annealing study"
+    assert "utm_" not in user_rows[0]["Источник"]
