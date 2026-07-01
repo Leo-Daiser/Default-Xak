@@ -12,6 +12,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from ..domain.fact_normalization import build_conflict_summary, dedupe_fact_rows
 from ..domain.unit_normalization import normalize_strength_to_mpa
 from ..runtime.presets import RuntimePresetId, get_runtime_preset
 
@@ -36,6 +37,7 @@ def enhance_answer_payload(payload: dict[str, Any], preset_id: RuntimePresetId |
     """Attach human answer, evidence and ranked facts to an ask payload."""
 
     preset = get_runtime_preset(preset_id)
+    payload["facts"] = dedupe_fact_rows(payload.get("facts") or [])
     evidence = normalize_evidence(payload)
     ranked = rank_facts(payload.get("facts") or [])
     payload["technical_answer"] = payload.get("answer")
@@ -44,6 +46,10 @@ def enhance_answer_payload(payload: dict[str, Any], preset_id: RuntimePresetId |
     payload["supporting_facts"] = ranked["supporting_facts"]
     payload["low_confidence_or_context_facts"] = ranked["low_confidence_or_context_facts"]
     payload["subgraph"] = _ensure_no_match_subgraph(payload)
+    payload["diagnostics"] = {
+        **(payload.get("diagnostics") or {}),
+        "fact_conflicts": build_conflict_summary(payload.get("facts") or []),
+    }
     human = build_human_answer(payload, preset.preset_id)
     payload["human_answer"] = human.model_dump()
     payload["answer"] = render_human_answer_markdown(human)
@@ -86,11 +92,15 @@ def build_human_answer(payload: dict[str, Any], preset_id: RuntimePresetId | str
     if payload.get("answer_mode") == "needs_clarification" or payload.get("intent") == "clarification":
         answer = _clarification_answer(payload)
     elif preset.preset_id == RuntimePresetId.STRICT_AUDIT:
-        return _strict_audit_answer(payload)
+        answer = _strict_audit_answer(payload)
     elif _is_technical_object_payload(payload):
         answer = _technical_object_answer(payload)
     elif payload.get("status") == "no_exact_match":
         answer = _negative_answer(payload)
+    elif _is_lab_activity_answer(payload):
+        answer = _lab_activity_answer(payload)
+    elif _is_overview_answer(payload) and not (payload.get("facts") or []):
+        answer = _overview_answer(payload)
     elif _has_grounded_llm_answer(payload):
         answer = _grounded_llm_answer(payload)
     elif _is_comparison(payload):
@@ -113,6 +123,7 @@ def build_human_answer(payload: dict[str, Any], preset_id: RuntimePresetId | str
             "Выводы основаны только на локально извлечённых фактах.",
         )
         answer.title = "Офлайн-режим: " + answer.title
+    answer = _with_conflict_caveats(answer, payload)
     return answer
 
 
@@ -212,24 +223,7 @@ def normalize_evidence(payload: dict[str, Any]) -> list[dict[str, Any]]:
 def rank_facts(facts: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     """Rank facts for main-answer use without removing original facts."""
 
-    deduped: list[dict[str, Any]] = []
-    seen = set()
-    for fact in facts:
-        if not isinstance(fact, dict):
-            continue
-        key = (
-            fact.get("material"),
-            fact.get("regime"),
-            fact.get("property"),
-            fact.get("value"),
-            fact.get("raw_value"),
-            fact.get("unit"),
-            fact.get("effect"),
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(fact)
+    deduped = dedupe_fact_rows([fact for fact in facts if isinstance(fact, dict)])
     scored = [(_fact_score(fact), index, fact) for index, fact in enumerate(deduped)]
     scored.sort(key=lambda item: (item[0], -item[1]), reverse=True)
     ordered = [fact for _, _, fact in scored]
@@ -387,9 +381,29 @@ def _overview_answer(payload: dict[str, Any]) -> HumanAnswer:
         "запросу",
     )
     facts = payload.get("facts") or []
+    evidence = payload.get("evidence") or payload.get("sources") or []
     regimes = _unique(row.get("regime") for row in facts)
     props = _unique(row.get("property") for row in facts)
     materials = _unique(row.get("material") for row in facts)
+    if not facts:
+        findings = [
+            "Подтверждённых graph facts по этому запросу не найдено.",
+        ]
+        if evidence:
+            findings.append("Найдены только релевантные фрагменты/evidence; они не считаются подтверждёнными экспериментальными фактами.")
+        else:
+            findings.append("Релевантные источники для ответа также не найдены.")
+        return HumanAnswer(
+            title=f"Структурированных фактов по {subject} не найдено",
+            summary=(
+                f"По {subject} в графе нет подтверждённых экспериментов, режимов или измеренных свойств. "
+                "Система не должна делать положительный вывод без graph facts."
+            ),
+            key_findings=findings,
+            caveats=["Partial evidence можно использовать только как навигацию к источникам, а не как доказанный факт."],
+            recommendation=f"Для ответа нужны документы, где явно описан {subject} и связанные с ним режимы или свойства.",
+            confidence_label="высокая" if not evidence else "средняя",
+        )
     findings = []
     if regimes:
         findings.append(f"Режимы: {', '.join(regimes[:6])}.")
@@ -410,6 +424,36 @@ def _overview_answer(payload: dict[str, Any]) -> HumanAnswer:
         caveats=caveats,
         recommendation="Для строгого вывода задайте материал, режим и свойство в одном вопросе.",
         confidence_label=_confidence(payload, facts),
+    )
+
+
+def _lab_activity_answer(payload: dict[str, Any]) -> HumanAnswer:
+    labs = _entity_names(payload.get("laboratories") or [])
+    teams = _entity_names(payload.get("teams") or payload.get("research_teams") or [])
+    facts = payload.get("facts") or []
+    for fact in facts:
+        if isinstance(fact, dict):
+            labs.extend(_list_values(fact.get("laboratory") or fact.get("laboratories")))
+            teams.extend(_list_values(fact.get("team") or fact.get("teams")))
+    labs = _unique(labs)
+    teams = _unique(teams)
+    findings: list[str] = []
+    if labs:
+        findings.append(f"Лаборатории: {', '.join(labs[:8])}.")
+    if teams:
+        findings.append(f"Команды: {', '.join(teams[:8])}.")
+    if not findings:
+        findings.append("Явно выделенных лабораторий или команд в структурированных фактах не найдено.")
+    return HumanAnswer(
+        title="Лаборатории и команды",
+        summary=(
+            "Система проверила структурированные сущности Laboratory/ResearchTeam и связанные эксперименты. "
+            "Ниже перечислены только явно извлечённые названия без внутренних идентификаторов."
+        ),
+        key_findings=findings,
+        caveats=["Если лаборатория указана только в свободном тексте источника и не извлечена как сущность, она останется в evidence, а не в списке фактов."],
+        recommendation="Для аудита откройте блок «Основание ответа» и raw diagnostics с источниками.",
+        confidence_label="средняя" if labs or teams else "высокая",
     )
 
 
@@ -583,6 +627,13 @@ def _is_history_answer(payload: dict[str, Any]) -> bool:
     return str(payload.get("answer_mode")) in {"history", "graph_decision_history"} or str(payload.get("analytical_intent")) == "decision_history"
 
 
+def _is_lab_activity_answer(payload: dict[str, Any]) -> bool:
+    intent = str(payload.get("analytical_intent") or payload.get("intent") or "")
+    constraints = payload.get("constraints") if isinstance(payload.get("constraints"), dict) else {}
+    raw_question = str(constraints.get("raw_question") or "").lower()
+    return intent == "lab_activity" or any(term in raw_question for term in ["лаборатор", "команд", "laboratory", "team"])
+
+
 def _is_overview_answer(payload: dict[str, Any]) -> bool:
     intent = str(payload.get("analytical_intent") or "")
     return payload.get("answer_mode") == "overview" or intent.endswith("_overview") or intent in {"topic_search", "graph_neighborhood", "equipment_usage", "lab_activity"}
@@ -621,11 +672,18 @@ def _comparison_material_summary(material: str, rows: list[dict[str, Any]]) -> t
     notes: list[str] = []
     for fact in rows:
         value = fact.get("value") if fact.get("value") is not None else fact.get("raw_value")
-        converted, note = normalize_strength_to_mpa(value, fact.get("unit"))
-        if converted is not None:
-            converted_values.append(converted)
-            if note:
-                notes.append(note)
+        normalized_value = fact.get("value_normalized")
+        normalized_unit = fact.get("unit_normalized")
+        if normalized_value is not None and normalized_unit == "MPa":
+            converted_values.append(float(normalized_value))
+            if str(fact.get("unit_original") or fact.get("unit") or "").strip() == "ksi":
+                notes.append(f"{float(fact.get('value_original') if fact.get('value_original') is not None else value):g} ksi ≈ {float(normalized_value):.0f} MPa")
+        else:
+            converted, note = normalize_strength_to_mpa(value, fact.get("unit"))
+            if converted is not None:
+                converted_values.append(converted)
+                if note:
+                    notes.append(note)
         if value is not None and value != "":
             original_unit = str(fact.get("unit") or "").strip()
             original_values.append(f"{float(value):g} {original_unit}".strip() if isinstance(value, int | float) else f"{value} {original_unit}".strip())
@@ -647,6 +705,80 @@ def _comparison_material_summary(material: str, rows: list[dict[str, Any]]) -> t
         )
     values_text = ", ".join(_unique(original_values[:4])) if original_values else "численные значения не извлечены"
     return f"{material}: численные значения не удалось привести к MPa; найдено: {values_text}; эффекты: {effect_text}.", None, notes
+
+
+def _with_conflict_caveats(answer: HumanAnswer, payload: dict[str, Any]) -> HumanAnswer:
+    diagnostics = payload.get("diagnostics") or {}
+    conflicts = [item for item in diagnostics.get("fact_conflicts") or [] if isinstance(item, dict)]
+    if not conflicts:
+        return answer
+    existing = set(answer.caveats)
+    for caveat in [_format_conflict_caveat(item) for item in conflicts[:2]]:
+        if caveat and caveat not in existing:
+            answer.caveats.append(caveat)
+            existing.add(caveat)
+    if answer.confidence_label == "высокая":
+        answer.confidence_label = "средняя"
+    return answer
+
+
+def _format_conflict_caveat(conflict: dict[str, Any]) -> str:
+    material = str(conflict.get("material") or "материала").strip()
+    regime = str(conflict.get("regime") or "").strip()
+    prop = _property_genitive(str(conflict.get("property") or "свойства"))
+    values = _format_conflict_values(conflict.get("values") or [])
+    regime_text = _regime_phrase(regime)
+    if values:
+        return (
+            f"В корпусе найдены разные значения {prop} для {material}{regime_text}: {values}. "
+            "Это может быть связано с различиями в параметрах режима, источниках или исходном состоянии материала."
+        )
+    return (
+        f"В корпусе найдены разные качественные эффекты по {prop} для {material}{regime_text}. "
+        "Это требует проверки источников и условий эксперимента."
+    )
+
+
+def _format_conflict_values(values: list[Any]) -> str:
+    rendered: list[str] = []
+    for item in values:
+        if not isinstance(item, dict):
+            continue
+        value = item.get("value")
+        unit = item.get("unit")
+        if value is None or not unit:
+            continue
+        rendered.append(f"{_format_number(value)} {unit}")
+    return " и ".join(_unique(rendered[:4]))
+
+
+def _format_number(value: Any) -> str:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    return f"{numeric:.0f}" if abs(numeric) >= 10 else f"{numeric:g}"
+
+
+def _property_genitive(value: str) -> str:
+    return {
+        "прочность": "прочности",
+        "твёрдость": "твёрдости",
+        "твердость": "твёрдости",
+        "пластичность": "пластичности",
+        "вязкость": "вязкости",
+        "коррозионная стойкость": "коррозионной стойкости",
+    }.get(value, value)
+
+
+def _regime_phrase(value: str) -> str:
+    return {
+        "отжиг": " после отжига",
+        "старение": " после старения",
+        "закалка": " после закалки",
+        "криообработка": " после криообработки",
+        "термообработка": " после термообработки",
+    }.get(value, f" при режиме {value}" if value else "")
 
 
 def _effect_label(effect: Any) -> str:
@@ -694,14 +826,14 @@ def _confidence(payload: dict[str, Any], facts: list[dict[str, Any]]) -> Literal
 def _numeric_values(facts: list[dict[str, Any]]) -> list[float]:
     values = []
     for fact in facts:
-        value = fact.get("value")
+        value = fact.get("value_normalized") if fact.get("value_normalized") is not None else fact.get("value")
         if isinstance(value, int | float):
             values.append(float(value))
     return values
 
 
 def _format_value_range(values: list[float], facts: list[dict[str, Any]]) -> str:
-    unit = next((str(f.get("unit")) for f in facts if f.get("unit")), "")
+    unit = next((str(f.get("unit_normalized") or f.get("unit")) for f in facts if f.get("unit_normalized") or f.get("unit")), "")
     if not values:
         return "нет численных значений"
     if len(values) == 1 or min(values) == max(values):
@@ -712,6 +844,26 @@ def _format_value_range(values: list[float], facts: list[dict[str, Any]]) -> str
 def _join_or_default(values: list[Any], default: str) -> str:
     cleaned = [str(value) for value in values if value]
     return ", ".join(dict.fromkeys(cleaned)) if cleaned else default
+
+
+def _entity_names(rows: list[Any]) -> list[str]:
+    result: list[str] = []
+    for row in rows:
+        if isinstance(row, dict):
+            value = row.get("canonical_name") or row.get("name") or row.get("label")
+        else:
+            value = row
+        if value:
+            result.append(str(value))
+    return result
+
+
+def _list_values(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value if item]
+    if value:
+        return [str(value)]
+    return []
 
 
 def _unique(values) -> list[str]:
