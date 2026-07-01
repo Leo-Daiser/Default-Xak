@@ -1818,7 +1818,9 @@ def _intent(question: str) -> str:
         return "laboratory_lookup"
     if "герметич" in q:
         return "requirement_lookup"
-    if any(term in q for term in ["пробел", "не хватает", "нет данных", "gap"]):
+    if any(term in q for term in ["противореч", "неоднород", "расход", "разные значения", "conflict", "different values"]):
+        return "conflict_analysis"
+    if any(term in q for term in ["пробел", "не хватает", "нет данных", "не измер", "не привед", "not reported", "gap"]):
         return "gap_analysis"
     if any(term in q for term in ["артикул", "article", "part number"]):
         return "part_article_lookup"
@@ -1866,6 +1868,225 @@ def _focus_terms(question: str) -> List[str]:
         if word in q.lower():
             terms.append(word)
     return _unique([term for term in terms if term])
+
+
+def _conflict_analysis_response(question: str, retrieval: Dict[str, Any], kg_diagnostics: Dict[str, Any]) -> Dict[str, Any]:
+    """Build a deterministic conflict answer from canonical facts, not retrieval noise."""
+
+    report = _knowledge_report(active_only=True)
+    conflicts = [item for item in report.get("conflict_groups") or [] if isinstance(item, dict)]
+    facts = _facts_for_conflicts(report.get("canonical_facts") or [], conflicts)
+    sources = _sources_from_fact_rows(facts)
+    if not conflicts:
+        return {
+            "answer": "В текущем canonical fact layer не найдено групп с расходящимися значениями для одного material + regime + property.",
+            "status": "ok",
+            "answer_mode": "graph_conflict_analysis",
+            "analytical_intent": "conflict_analysis",
+            "intent": "conflict_analysis",
+            "constraints": {"raw_question": question, "materials": [], "regimes": [], "properties": []},
+            "facts": [],
+            "technical_objects": [],
+            "parts": [],
+            "parameters": [],
+            "standards": [],
+            "materials": [],
+            "requirements": [],
+            "equipment": [],
+            "laboratories": [],
+            "sources": [],
+            "gaps": [],
+            "data_gaps": [],
+            "partial_matches": {},
+            "decision_history": [],
+            "subgraph": {"nodes": [], "edges": []},
+            "retrieval": retrieval,
+            "llm": llm_client.status(),
+            "diagnostics": {**kg_diagnostics, "fact_conflicts": []},
+        }
+    return {
+        "answer": _conflict_analysis_draft(conflicts),
+        "status": "ok",
+        "answer_mode": "graph_conflict_analysis",
+        "analytical_intent": "conflict_analysis",
+        "intent": "conflict_analysis",
+        "constraints": {
+            "raw_question": question,
+            "materials": _unique(conflict.get("material") for conflict in conflicts),
+            "regimes": _unique(conflict.get("regime") for conflict in conflicts),
+            "properties": _unique(conflict.get("property") for conflict in conflicts),
+        },
+        "facts": facts,
+        "technical_objects": [],
+        "parts": [],
+        "parameters": [],
+        "standards": [],
+        "materials": [{"name": item} for item in _unique(conflict.get("material") for conflict in conflicts)],
+        "requirements": [],
+        "equipment": [],
+        "laboratories": [],
+        "sources": sources,
+        "evidence": sources,
+        "gaps": [],
+        "data_gaps": [],
+        "partial_matches": {},
+        "decision_history": [],
+        "subgraph": _build_subgraph_from_facts(facts, sources, []),
+        "graph_context": {
+            "conflict_groups_count": len(conflicts),
+            "canonical_facts_count": len(facts),
+            "sources_count": len(sources),
+        },
+        "retrieval": {**retrieval, "analytical_intent": "conflict_analysis", "answer_mode": "graph_conflict_analysis"},
+        "llm": llm_client.status(),
+        "diagnostics": {**kg_diagnostics, "fact_conflicts": conflicts},
+    }
+
+
+def _facts_for_conflicts(rows: list[dict[str, Any]], conflicts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        for conflict in conflicts:
+            if (
+                normalise(str(row.get("material") or "")) == normalise(str(conflict.get("material") or ""))
+                and normalise(str(row.get("regime") or "")) == normalise(str(conflict.get("regime") or ""))
+                and normalise(str(row.get("property") or "")) == normalise(str(conflict.get("property") or ""))
+            ):
+                result.append(row)
+                break
+    return result
+
+
+def _sources_from_fact_rows(rows: list[dict[str, Any]], limit: int = 12) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    seen = set()
+    for row in rows:
+        for evidence in row.get("evidence") or []:
+            if not isinstance(evidence, dict):
+                continue
+            key = (evidence.get("document_id") or evidence.get("doc_id"), evidence.get("chunk_id") or evidence.get("source_chunk_id"), evidence.get("quote"))
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(
+                {
+                    "source_name": evidence.get("source_name"),
+                    "document_id": evidence.get("document_id") or evidence.get("doc_id"),
+                    "chunk_id": evidence.get("chunk_id") or evidence.get("source_chunk_id"),
+                    "page": evidence.get("page"),
+                    "quote": evidence.get("quote"),
+                    "score": evidence.get("confidence"),
+                    "evidence_type": "graph_fact",
+                }
+            )
+            if len(result) >= limit:
+                return result
+    return result
+
+
+def _conflict_analysis_draft(conflicts: list[dict[str, Any]]) -> str:
+    parts = []
+    for conflict in conflicts[:6]:
+        material = str(conflict.get("material") or "материал")
+        regime = str(conflict.get("regime") or "режим")
+        prop = str(conflict.get("property") or "свойство")
+        values = []
+        for item in conflict.get("values") or []:
+            if not isinstance(item, dict):
+                continue
+            value = item.get("value")
+            unit = item.get("unit") or item.get("unit_normalized") or ""
+            if value is not None:
+                values.append(f"{float(value):g} {unit}".strip())
+        values_text = ", ".join(_unique(values)[:8]) or "значения расходятся"
+        parts.append(f"{material} / {regime} / {prop}: {values_text}")
+    return "Найдены неоднородные значения для одинаковых связок material + regime + property: " + "; ".join(parts) + "."
+
+
+def _material_property_inventory_response(
+    question: str,
+    constraints: Any,
+    retrieval: Dict[str, Any],
+    kg_diagnostics: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Answer broad inventory questions from canonical facts instead of exact-match constraints."""
+
+    requested_properties = [normalise(str(item)) for item in getattr(constraints, "properties", []) or []]
+    requested_regimes = [normalise(str(item)) for item in getattr(constraints, "regimes", []) or []]
+    rows = []
+    for row in _knowledge_report(active_only=True).get("canonical_facts") or []:
+        if not isinstance(row, dict):
+            continue
+        if requested_properties and normalise(str(row.get("property") or "")) not in requested_properties:
+            continue
+        if requested_regimes and not _inventory_regime_matches(row.get("regime"), requested_regimes):
+            continue
+        if not row.get("material"):
+            continue
+        rows.append(row)
+    facts = rows[:20]
+    sources = _sources_from_fact_rows(facts)
+    material_names = _unique(row.get("material") for row in facts)
+    regimes = _unique(row.get("regime") for row in facts)
+    properties = _unique(row.get("property") for row in facts)
+    if not facts:
+        answer = "В canonical fact layer не найдено материалов с подтверждёнными данными по заданному свойству."
+        status = "partial"
+    else:
+        answer = (
+            "Найдены материалы с подтверждёнными данными по "
+            f"{', '.join(properties) if properties else 'заданному свойству'}: "
+            f"{', '.join(material_names)}."
+        )
+        status = "ok"
+    return {
+        "answer": answer,
+        "status": status,
+        "answer_mode": "material_inventory",
+        "analytical_intent": "material_inventory",
+        "intent": "material_inventory",
+        "constraints": {
+            "raw_question": question,
+            "materials": material_names,
+            "regimes": regimes,
+            "properties": properties or list(getattr(constraints, "properties", []) or []),
+        },
+        "facts": facts,
+        "technical_objects": [],
+        "parts": [],
+        "parameters": [],
+        "standards": [],
+        "materials": [{"name": item} for item in material_names],
+        "requirements": [],
+        "equipment": [],
+        "laboratories": [],
+        "sources": sources,
+        "evidence": sources,
+        "gaps": [],
+        "data_gaps": [],
+        "partial_matches": {},
+        "decision_history": [],
+        "subgraph": _build_subgraph_from_facts(facts, sources, []),
+        "graph_context": {
+            "canonical_facts_count": len(facts),
+            "materials_count": len(material_names),
+            "sources_count": len(sources),
+        },
+        "retrieval": {**retrieval, "analytical_intent": "material_inventory", "answer_mode": "material_inventory"},
+        "llm": llm_client.status(),
+        "diagnostics": kg_diagnostics,
+    }
+
+
+def _inventory_regime_matches(regime: Any, requested_regimes: list[str]) -> bool:
+    value = normalise(str(regime or ""))
+    if not requested_regimes:
+        return True
+    if "термообработка" in requested_regimes:
+        return value in {"отжиг", "старение", "закалка", "термообработка"}
+    return value in requested_regimes
 
 
 def _question_constraints(question: str) -> Dict[str, List[str]]:
@@ -3450,6 +3671,7 @@ async def _ask_impl(
         "query_constraints": planned_constraints.model_dump(),
     }
     analytics_plan = analytical_router.build_plan(question, planned_constraints)
+    ask_intent = _intent(question)
 
     if planned_constraints.intent == QueryIntent.MATERIAL_REGIME_PROPERTY_EFFECT and planned_constraints.require_exact_match:
         graph_result = graph_retriever.material_regime_property(planned_constraints)
@@ -3467,8 +3689,16 @@ async def _ask_impl(
             partial_matches=graph_result.partial_matches,
             gaps=graph_result.gaps,
             retrieval=graph_retrieval_meta,
-                llm=llm_client.status(),
-            ), preset_id=preset.preset_id, input_source=input_source, query_params_ignored=query_params_ignored)
+            llm=llm_client.status(),
+        ), preset_id=preset.preset_id, input_source=input_source, query_params_ignored=query_params_ignored)
+
+    if ask_intent == "material_inventory" and planned_constraints.properties:
+        return _decorate_ask_response(
+            _material_property_inventory_response(question, planned_constraints, graph_retrieval_meta, kg_diagnostics),
+            preset_id=preset.preset_id,
+            input_source=input_source,
+            query_params_ignored=query_params_ignored,
+        )
 
     if _should_use_analytical_engine(analytics_plan):
         return _decorate_ask_response(_analytics_response(
@@ -3503,7 +3733,13 @@ async def _ask_impl(
             llm=llm_client.status(),
         ), preset_id=preset.preset_id, input_source=input_source, query_params_ignored=query_params_ignored)
 
-    ask_intent = _intent(question)
+    if ask_intent == "conflict_analysis":
+        return _decorate_ask_response(
+            _conflict_analysis_response(question, graph_retrieval_meta, kg_diagnostics),
+            preset_id=preset.preset_id,
+            input_source=input_source,
+            query_params_ignored=query_params_ignored,
+        )
     rewrite = llm_client.rewrite_question_for_retrieval(question)
     retrieval_question = str((rewrite or {}).get("search_query") or question)
     extractions: List[tuple[Chunk, Any]] = []

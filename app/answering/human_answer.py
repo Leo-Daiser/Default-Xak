@@ -8,13 +8,19 @@ normalizes evidence rows for the UI.
 from __future__ import annotations
 
 import re
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from pydantic import BaseModel, Field
 
 from ..domain.fact_normalization import build_conflict_summary, dedupe_fact_rows
 from ..domain.unit_normalization import normalize_strength_to_mpa
 from ..runtime.presets import RuntimePresetId, get_runtime_preset
+from .grounding_guard import (
+    build_repair_request,
+    diagnostics_after_repair,
+    guard_llm_polished_answer,
+    skipped_guard_diagnostics,
+)
 
 
 class HumanAnswer(BaseModel):
@@ -33,7 +39,15 @@ INTERNAL_ID_RE = re.compile(
 )
 
 
-def enhance_answer_payload(payload: dict[str, Any], preset_id: RuntimePresetId | str | None = None) -> dict[str, Any]:
+LLMRepairer = Callable[[dict[str, Any]], str | None]
+
+
+def enhance_answer_payload(
+    payload: dict[str, Any],
+    preset_id: RuntimePresetId | str | None = None,
+    *,
+    llm_repairer: LLMRepairer | None = None,
+) -> dict[str, Any]:
     """Attach human answer, evidence and ranked facts to an ask payload."""
 
     preset = get_runtime_preset(preset_id)
@@ -50,7 +64,7 @@ def enhance_answer_payload(payload: dict[str, Any], preset_id: RuntimePresetId |
         **(payload.get("diagnostics") or {}),
         "fact_conflicts": build_conflict_summary(payload.get("facts") or []),
     }
-    human = build_human_answer(payload, preset.preset_id)
+    human = build_human_answer(payload, preset.preset_id, llm_repairer=llm_repairer)
     payload["human_answer"] = human.model_dump()
     payload["answer"] = render_human_answer_markdown(human)
     payload["graph_context"] = _with_evidence_count(payload.get("graph_context") or {}, evidence, payload)
@@ -85,14 +99,24 @@ def _ensure_no_match_subgraph(payload: dict[str, Any]) -> dict[str, Any]:
     return {"nodes": nodes, "edges": edges}
 
 
-def build_human_answer(payload: dict[str, Any], preset_id: RuntimePresetId | str | None = None) -> HumanAnswer:
+def build_human_answer(
+    payload: dict[str, Any],
+    preset_id: RuntimePresetId | str | None = None,
+    *,
+    llm_repairer: LLMRepairer | None = None,
+) -> HumanAnswer:
     """Build a readable grounded answer from an already structured payload."""
 
     preset = get_runtime_preset(preset_id)
+    _record_llm_grounding_guard(payload)
     if payload.get("answer_mode") == "needs_clarification" or payload.get("intent") == "clarification":
         answer = _clarification_answer(payload)
     elif preset.preset_id == RuntimePresetId.STRICT_AUDIT:
         answer = _strict_audit_answer(payload)
+    elif _is_conflict_answer(payload):
+        answer = _conflict_answer(payload)
+    elif _is_gap_answer(payload):
+        answer = _gap_answer(payload)
     elif _is_technical_object_payload(payload):
         answer = _technical_object_answer(payload)
     elif payload.get("status") == "no_exact_match":
@@ -102,11 +126,9 @@ def build_human_answer(payload: dict[str, Any], preset_id: RuntimePresetId | str
     elif _is_overview_answer(payload) and not (payload.get("facts") or []):
         answer = _overview_answer(payload)
     elif _has_grounded_llm_answer(payload):
-        answer = _grounded_llm_answer(payload)
+        answer = _grounded_llm_answer(payload, llm_repairer=llm_repairer)
     elif _is_comparison(payload):
         answer = _comparison_answer(payload)
-    elif _is_gap_answer(payload):
-        answer = _gap_answer(payload)
     elif _is_history_answer(payload):
         answer = _history_answer(payload)
     elif _is_similar_answer(payload):
@@ -139,7 +161,7 @@ def _has_grounded_llm_answer(payload: dict[str, Any]) -> bool:
     )
 
 
-def _grounded_llm_answer(payload: dict[str, Any]) -> HumanAnswer:
+def _grounded_llm_answer(payload: dict[str, Any], *, llm_repairer: LLMRepairer | None = None) -> HumanAnswer:
     if _is_comparison(payload):
         base = _comparison_answer(payload)
     elif _is_gap_answer(payload):
@@ -152,8 +174,76 @@ def _grounded_llm_answer(payload: dict[str, Any]) -> HumanAnswer:
         base = _overview_answer(payload)
     else:
         base = _strict_positive_or_generic_answer(payload)
-    base.summary = _sanitize_main_answer(str(payload.get("technical_answer") or base.summary).strip())
+    guard = (payload.get("diagnostics") or {}).get("llm_grounding_guard") or {}
+    if guard.get("status") == "pass":
+        base.summary = _sanitize_main_answer(str(payload.get("technical_answer") or base.summary).strip())
+        return base
+    repaired = _try_repair_llm_answer(payload, base, llm_repairer)
+    if repaired:
+        base.summary = _sanitize_main_answer(repaired)
+        return base
+    if guard.get("status") != "pass":
+        return base
     return base
+
+
+def _record_llm_grounding_guard(payload: dict[str, Any]) -> None:
+    diagnostics = payload.get("diagnostics")
+    if not isinstance(diagnostics, dict):
+        diagnostics = {}
+        payload["diagnostics"] = diagnostics
+    if diagnostics.get("llm_grounding_guard"):
+        return
+    if not _has_grounded_llm_answer(payload):
+        diagnostics["llm_grounding_guard"] = skipped_guard_diagnostics()
+        return
+    result = guard_llm_polished_answer(str(payload.get("technical_answer") or ""), payload)
+    diagnostics["llm_grounding_guard"] = result.diagnostics()
+
+
+def _try_repair_llm_answer(payload: dict[str, Any], base: HumanAnswer, llm_repairer: LLMRepairer | None) -> str | None:
+    if llm_repairer is None:
+        return None
+    diagnostics = payload.get("diagnostics") if isinstance(payload.get("diagnostics"), dict) else {}
+    guard = diagnostics.get("llm_grounding_guard") if isinstance(diagnostics.get("llm_grounding_guard"), dict) else {}
+    if guard.get("status") != "fallback" or guard.get("repair_attempted"):
+        return None
+    if ((guard.get("grounding_context") or {}).get("no_facts_mode")):
+        return None
+    unsafe_answer = str(payload.get("technical_answer") or "")
+    first_result = guard_llm_polished_answer(unsafe_answer, payload)
+    if not first_result.violations:
+        return None
+    repair_request = build_repair_request(
+        question=_question_text(payload),
+        unsafe_answer=unsafe_answer,
+        deterministic_answer=render_human_answer_markdown(base),
+        first_result=first_result,
+    )
+    try:
+        repaired = llm_repairer(repair_request)
+    except Exception as exc:  # pragma: no cover - defensive; tested through fallback behavior.
+        diagnostics["llm_grounding_guard"] = diagnostics_after_repair(
+            first_result,
+            None,
+            fallback_reason=f"repair_exception:{type(exc).__name__}",
+        )
+        return None
+    if not repaired:
+        diagnostics["llm_grounding_guard"] = diagnostics_after_repair(first_result, None, fallback_reason="repair_empty")
+        return None
+    repair_payload = {**payload, "technical_answer": str(repaired)}
+    repair_result = guard_llm_polished_answer(str(repaired), repair_payload)
+    diagnostics["llm_grounding_guard"] = diagnostics_after_repair(first_result, repair_result)
+    if repair_result.status == "pass":
+        payload["technical_answer_repaired"] = str(repaired)
+        return str(repaired)
+    return None
+
+
+def _question_text(payload: dict[str, Any]) -> str:
+    constraints = payload.get("constraints") if isinstance(payload.get("constraints"), dict) else {}
+    return str(constraints.get("raw_question") or payload.get("question") or "")
 
 
 def render_human_answer_markdown(answer: HumanAnswer) -> str:
@@ -515,10 +605,17 @@ def _comparison_answer(payload: dict[str, Any]) -> HumanAnswer:
 def _gap_answer(payload: dict[str, Any]) -> HumanAnswer:
     gaps = payload.get("data_gaps") or payload.get("gaps") or []
     findings = []
+    seen = set()
     for gap in gaps[:6]:
         if isinstance(gap, dict):
-            subject = " + ".join(str(gap.get(key)) for key in ["material", "regime", "property"] if gap.get(key))
-            findings.append(f"{subject or 'Неуточнённая область'}: {gap.get('reason') or gap.get('gap')}.")
+            subject = _gap_subject(gap, payload)
+            reason = str(gap.get("reason") or gap.get("gap") or "данные отсутствуют").strip()
+            line = f"{subject}: {reason}."
+            key = line.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            findings.append(line)
     if not findings:
         findings = ["По заданным ограничениям явных пробелов в графе не найдено."]
     return HumanAnswer(
@@ -529,6 +626,84 @@ def _gap_answer(payload: dict[str, Any]) -> HumanAnswer:
         recommendation="Приоритет для доразметки: добавить документы или таблицы, где явно связаны материал, режим и отсутствующее свойство.",
         confidence_label="средняя" if gaps else "высокая",
     )
+
+
+def _gap_subject(gap: dict[str, Any], payload: dict[str, Any]) -> str:
+    explicit = " + ".join(str(gap.get(key)) for key in ["material", "regime", "property"] if gap.get(key))
+    if explicit:
+        return explicit
+    missing_for = str(gap.get("missing_for") or "").strip()
+    text = " ".join(
+        str(item)
+        for item in [
+            missing_for,
+            gap.get("gap"),
+            gap.get("reason"),
+            *(str(source.get("quote") or "") for source in payload.get("sources") or [] if isinstance(source, dict)),
+            *(str(source.get("quote") or "") for source in payload.get("evidence") or [] if isinstance(source, dict)),
+        ]
+    ).lower()
+    if "корроз" in text or "corrosion" in text:
+        return "коррозионная стойкость"
+    if "прочн" in text or "strength" in text:
+        return "прочность"
+    if "тверд" in text or "твёрд" in text or "hardness" in text:
+        return "твёрдость"
+    return missing_for or "Неуточнённая область"
+
+
+def _conflict_answer(payload: dict[str, Any]) -> HumanAnswer:
+    diagnostics = payload.get("diagnostics") if isinstance(payload.get("diagnostics"), dict) else {}
+    conflicts = [item for item in diagnostics.get("fact_conflicts") or [] if isinstance(item, dict)]
+    facts = payload.get("primary_facts") or payload.get("facts") or []
+    findings = []
+    for conflict in conflicts[:6]:
+        material = str(conflict.get("material") or "материал").strip()
+        regime = str(conflict.get("regime") or "режим").strip()
+        prop = str(conflict.get("property") or "свойство").strip()
+        values = _format_conflict_values(conflict.get("values") or [])
+        if values:
+            findings.append(f"{material}: {regime}; {prop} расходится между источниками: {values}.")
+        else:
+            findings.append(f"{material}: {regime}; {prop} имеет разные качественные эффекты в источниках.")
+    if not findings and facts:
+        grouped = _conflict_candidates_from_facts(facts)
+        findings = grouped[:6]
+    if not findings:
+        findings = ["В canonical fact layer не найдено групп с расходящимися значениями для одной связки material + regime + property."]
+    return HumanAnswer(
+        title="Неоднородность данных",
+        summary=(
+            "Система проверила canonical facts и сгруппировала случаи, где для одного материала, режима и свойства "
+            "найдены разные значения или эффекты."
+        ),
+        key_findings=findings,
+        caveats=[
+            "Это не выбор единственно правильного значения: расхождения могут быть связаны с источниками, параметрами режима или исходным состоянием материала."
+        ],
+        recommendation="Для строгого вывода откройте evidence и сравните условия экспериментов в источниках.",
+        confidence_label="средняя" if conflicts else "низкая",
+    )
+
+
+def _conflict_candidates_from_facts(facts: list[dict[str, Any]]) -> list[str]:
+    groups: dict[tuple[str, str, str], set[str]] = {}
+    for fact in facts:
+        if not isinstance(fact, dict):
+            continue
+        material = str(fact.get("material") or "").strip()
+        regime = str(fact.get("regime") or "").strip()
+        prop = str(fact.get("property") or "").strip()
+        value = fact.get("value_normalized") if fact.get("value_normalized") is not None else fact.get("value")
+        unit = fact.get("unit_normalized") or fact.get("unit") or ""
+        if not (material and regime and prop and value is not None):
+            continue
+        groups.setdefault((material, regime, prop), set()).add(f"{_format_number(value)} {unit}".strip())
+    result = []
+    for (material, regime, prop), values in groups.items():
+        if len(values) > 1:
+            result.append(f"{material}: {regime}; {prop} расходится между источниками: {' и '.join(sorted(values))}.")
+    return result
 
 
 def _history_answer(payload: dict[str, Any]) -> HumanAnswer:
@@ -616,7 +791,19 @@ def _is_comparison(payload: dict[str, Any]) -> bool:
 
 
 def _is_gap_answer(payload: dict[str, Any]) -> bool:
-    return str(payload.get("answer_mode")) in {"gaps", "graph_gap_analysis"} or str(payload.get("analytical_intent")) == "gap_analysis"
+    return (
+        str(payload.get("answer_mode")) in {"gaps", "graph_gap_analysis"}
+        or str(payload.get("analytical_intent")) == "gap_analysis"
+        or str(payload.get("intent")) == "gap_analysis"
+    )
+
+
+def _is_conflict_answer(payload: dict[str, Any]) -> bool:
+    return (
+        str(payload.get("answer_mode")) in {"conflict", "graph_conflict_analysis"}
+        or str(payload.get("analytical_intent")) == "conflict_analysis"
+        or str(payload.get("intent")) == "conflict_analysis"
+    )
 
 
 def _is_similar_answer(payload: dict[str, Any]) -> bool:
@@ -640,6 +827,8 @@ def _is_overview_answer(payload: dict[str, Any]) -> bool:
 
 
 def _is_technical_object_payload(payload: dict[str, Any]) -> bool:
+    if _is_gap_answer(payload) or _is_conflict_answer(payload):
+        return False
     if payload.get("intent") in {"object_overview", "parameter_lookup", "part_article_lookup", "material_lookup", "standard_lookup", "requirement_lookup"}:
         return True
     return any(isinstance(fact, dict) and fact.get("predicate") for fact in payload.get("facts") or [])
