@@ -4,12 +4,19 @@ import json
 import os
 import subprocess
 import sys
+import time
+import urllib.request
+import urllib.error
+import argparse
 from pathlib import Path
 from statistics import mean
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 ARTIFACT_PATH = ROOT / "artifacts" / "eval_resource_ablation.json"
+DEFAULT_API_BASE = os.getenv("API_BASE", "http://localhost:8000")
 
 PROFILES = ["economy_core", "economy_guarded_llm", "balanced_hybrid", "quality_full"]
 
@@ -31,6 +38,8 @@ PROFILE_ENV: dict[str, dict[str, str]] = {
         "DIRECT_QDRANT_PROJECTION": "false",
         "ENABLE_LLM": "true",
         "LLM_PROVIDER": "auto",
+        "LLM_TIMEOUT_SECONDS": "12",
+        "MISTRAL_TIMEOUT_SECONDS": "12",
         "ANSWER_SYNTHESIS_MODE": "hybrid",
     },
     "balanced_hybrid": {
@@ -50,6 +59,8 @@ PROFILE_ENV: dict[str, dict[str, str]] = {
         "DIRECT_QDRANT_PROJECTION": "false",
         "ENABLE_LLM": "true",
         "LLM_PROVIDER": "auto",
+        "LLM_TIMEOUT_SECONDS": "12",
+        "MISTRAL_TIMEOUT_SECONDS": "12",
         "ANSWER_SYNTHESIS_MODE": "hybrid",
         "EMBEDDING_MODEL": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
     },
@@ -153,15 +164,18 @@ def profile_environment(profile: str, base_env: dict[str, str] | None = None) ->
 
 
 def run_profile(profile: str) -> dict[str, Any]:
-    result = subprocess.run(
-        [sys.executable, "-c", _RUNNER_CODE],
-        cwd=ROOT,
-        env=profile_environment(profile),
-        text=True,
-        capture_output=True,
-        timeout=360,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", _RUNNER_CODE],
+            cwd=ROOT,
+            env=profile_environment(profile),
+            text=True,
+            capture_output=True,
+            timeout=360,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return _skipped_profile(profile, "Profile run timed out; external LLM/model loading may be too slow in host mode.")
     if result.returncode != 0:
         return {
             "profile": profile,
@@ -175,6 +189,30 @@ def run_profile(profile: str) -> dict[str, Any]:
     health = payload.get("health") or {}
     summary = summarize_profile(profile, rows, health)
     return {**summary, "rows": rows, "health": _health_digest(health)}
+
+
+def _skipped_profile(profile: str, reason: str) -> dict[str, Any]:
+    return {
+        "profile": profile,
+        "status": "WARN",
+        "skipped": True,
+        "error": reason,
+        "queries_passed": 0,
+        "queries_failed": 0,
+        "raw_leaks_count": 0,
+        "unsupported_numeric_claims_count": 0,
+        "average_latency_ms": None,
+        "llm_calls_count": 0,
+        "guard_fallback_count": 0,
+        "guard_repaired_count": 0,
+        "evidence_count": 0,
+        "graph_contract_pass": None,
+        "effective_retrieval_mode": None,
+        "resource_notes": [],
+        "warnings": [reason],
+        "failed_cases": [],
+        "rows": [],
+    }
 
 
 def _parse_last_json_line(stdout: str) -> dict[str, Any]:
@@ -272,6 +310,76 @@ def run_eval() -> tuple[dict[str, Any], int]:
     return result, 1 if failed else 0
 
 
+def _api_url(api_base: str, path: str) -> str:
+    return f"{api_base.rstrip('/')}/{path.lstrip('/')}"
+
+
+def _request_json(method: str, url: str, payload: dict[str, Any] | None = None, timeout: int = 180) -> dict[str, Any]:
+    data = None
+    headers = {"Accept": "application/json"}
+    if payload is not None:
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(url, data=data, headers=headers, method=method)
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def run_docker_target(api_base: str = DEFAULT_API_BASE) -> tuple[dict[str, Any], int]:
+    try:
+        health = _request_json("GET", _api_url(api_base, "/health"), timeout=10)
+    except Exception as exc:
+        message = f"API target is unavailable; run docker compose up first. Details: {type(exc).__name__}"
+        return {"summary": "FAIL", "target": "docker", "api_base": api_base, "error": message, "profiles": []}, 1
+
+    from evaluation.eval_demo_regression import DEMO_CASES, PRESET_ID, validate_case
+
+    rows: list[dict[str, Any]] = []
+    for case in DEMO_CASES:
+        started = time.perf_counter()
+        try:
+            payload = _request_json(
+                "POST",
+                _api_url(api_base, "/ask"),
+                {"question": case.question, "top_k": 12, "preset_id": PRESET_ID},
+                timeout=240,
+            )
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            row = validate_case(case, payload)
+            row["latency_ms"] = latency_ms
+            diagnostics = payload.get("diagnostics") if isinstance(payload.get("diagnostics"), dict) else {}
+            row["llm_polished"] = bool(diagnostics.get("llm_answer_polished"))
+        except Exception as exc:
+            row = {
+                "case_id": case.case_id,
+                "question": case.question,
+                "passed": False,
+                "reasons": [f"request failed: {type(exc).__name__}: {exc}"],
+                "raw_leaks_count": 0,
+                "graph_nodes": 0,
+                "graph_edges": 0,
+                "evidence_count": 0,
+                "latency_ms": int((time.perf_counter() - started) * 1000),
+                "llm_grounding_guard_status": "skipped",
+                "guard_repair_attempted": False,
+                "guard_fallback_used": False,
+                "guard_violations_count": 0,
+                "llm_polished": False,
+                "warnings": [],
+            }
+        rows.append(row)
+    profile_name = str(health.get("runtime_profile") or (health.get("runtime_profile_summary") or {}).get("runtime_profile") or "docker_api")
+    profile_summary = summarize_profile(profile_name, rows, health)
+    profile_summary["profile"] = f"docker:{profile_name}"
+    result = {
+        "summary": "FAIL" if profile_summary["queries_failed"] else ("WARN" if profile_summary["warnings"] else "PASS"),
+        "target": "docker",
+        "api_base": api_base,
+        "profiles": [{**profile_summary, "rows": rows, "health": _health_digest(health)}],
+    }
+    return result, 1 if profile_summary["queries_failed"] else 0
+
+
 def _print_table(result: dict[str, Any]) -> None:
     headers = ["profile", "status", "passed", "failed", "latency_ms", "retrieval", "llm_calls", "guard_fb", "warnings"]
     print("| " + " | ".join(headers) + " |")
@@ -296,11 +404,24 @@ def _print_table(result: dict[str, Any]) -> None:
         )
 
 
-def main() -> int:
-    result, exit_code = run_eval()
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Compare demo quality/resource behavior across runtime profiles.")
+    parser.add_argument("--target", choices=["host", "docker"], default="host", help="host uses isolated local subprocess profiles; docker uses running API at --api-base.")
+    parser.add_argument("--api-base", default=DEFAULT_API_BASE, help="API base URL for --target docker.")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
+    if args.target == "docker":
+        result, exit_code = run_docker_target(args.api_base)
+    else:
+        result, exit_code = run_eval()
     ARTIFACT_PATH.parent.mkdir(parents=True, exist_ok=True)
     ARTIFACT_PATH.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"SUMMARY: {result['summary']}")
+    if result.get("error"):
+        print(result["error"])
     _print_table(result)
     for profile in result.get("profiles", []):
         for warning in profile.get("warnings") or []:

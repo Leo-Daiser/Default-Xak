@@ -14,7 +14,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.config import settings  # noqa: E402
-from app.runtime.profiles import runtime_profile_summary  # noqa: E402
+from app.runtime.profiles import profile_consistency_issues, runtime_profile_summary  # noqa: E402
 from scripts.extraction_quality_report import Neo4jScanOptions, build_report as build_extraction_report  # noqa: E402
 
 
@@ -137,6 +137,18 @@ def build_resource_report(
         "facts_without_evidence": extraction_summary.get("facts_without_evidence", "unknown"),
         "normalized_measurements_count": extraction_summary.get("normalized_measurements_count", "unknown"),
     }
+    consistency_issues = profile_consistency_issues(
+        runtime_profile=str(summary.get("runtime_profile") or ""),
+        retrieval_mode=str(summary.get("retrieval_mode") or ""),
+        local_embeddings_enabled=bool(summary.get("local_embeddings_enabled")),
+        llm_enabled=bool(summary.get("llm_enabled")),
+        llm_provider=str(summary.get("llm_provider") or ""),
+        effective_retrieval_mode=str(summary.get("effective_retrieval_mode") or ""),
+        hybrid_dense_enabled=retrieval.get("hybrid_dense_enabled") if "hybrid_dense_enabled" in retrieval else None,
+    )
+    strict = _env_bool("RESOURCE_STRICT", False)
+    summary["profile_consistency_status"] = "FAIL" if strict and consistency_issues else "WARN" if consistency_issues else "PASS"
+    summary["profile_consistency_messages"] = consistency_issues
 
     return {
         "summary": {
@@ -156,11 +168,7 @@ def build_resource_report(
 
 def _resource_warnings(summary: dict[str, Any], retrieval: dict[str, Any], llm_enabled: bool, llm_extraction: bool) -> list[str]:
     warnings: list[str] = []
-    profile = summary.get("runtime_profile")
-    if profile == "economy_core" and summary.get("local_embeddings_enabled"):
-        warnings.append("economy_core should not enable local embeddings.")
-    if profile == "economy_core" and llm_enabled:
-        warnings.append("economy_core should keep LLM disabled; explicit env override is active.")
+    warnings.extend(str(item) for item in summary.get("profile_consistency_messages") or [])
     if llm_extraction:
         warnings.append("LLM extraction is enabled; resource-efficient mode expects deterministic extraction.")
     if retrieval.get("direct_qdrant_projection") and not retrieval.get("qdrant_ready"):
@@ -168,6 +176,13 @@ def _resource_warnings(summary: dict[str, Any], retrieval: dict[str, Any], llm_e
     if not llm_enabled:
         warnings.append("LLM polish disabled; answer quality relies fully on deterministic templates.")
     return warnings
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -196,7 +211,7 @@ def main(argv: list[str] | None = None) -> int:
         for warning in report["warnings"]:
             print(f"- {warning}")
     print(f"\nJSON report: {output}")
-    return 0
+    return 1 if report["summary"].get("profile_consistency_status") == "FAIL" else 0
 
 
 if __name__ == "__main__":

@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..domain.fact_normalization import (
+    build_conflict_summary,
+    canonical_fact_key_from_row,
+    dedupe_fact_rows,
+    with_normalized_measurement_fields,
+)
 from ..domain.ontology import DataGap, Evidence
 from ..domain.query_constraints import QueryConstraints
 from ..graph.graph_models import DecisionHistoryItem, ExperimentFact, PartialMatches
@@ -52,6 +58,7 @@ class AnswerBuilder:
                 "graph_context": _graph_context_stats(fact_rows, sources, subgraph),
             }
         )
+        response["diagnostics"]["fact_conflicts"] = build_conflict_summary(fact_rows)
         return response
 
     def no_match_response(
@@ -223,24 +230,30 @@ class AnswerBuilder:
             for measurement in fact.measurements:
                 if constraints.properties and measurement.property_name not in constraints.properties:
                     continue
-                rows.append(
-                    {
-                        "experiment_id": fact.experiment_id,
-                        "material": ", ".join(fact.materials),
-                        "regime": ", ".join(fact.regimes),
-                        "property": measurement.property_name,
-                        "value": measurement.value,
-                        "raw_value": measurement.raw_value,
-                        "unit": measurement.unit,
-                        "effect": measurement.effect,
-                        "equipment": ", ".join(fact.equipment),
-                        "laboratory": ", ".join(fact.laboratories),
-                        "source_chunk_id": fact.source_chunk_ids[0] if fact.source_chunk_ids else None,
-                        "doc_id": fact.evidence[0].document_id if fact.evidence else None,
-                        "evidence": [evidence.model_dump() for evidence in measurement.evidence or fact.evidence],
-                    }
-                )
-        return rows
+                normalized = with_normalized_measurement_fields(measurement)
+                row = {
+                    "experiment_id": fact.experiment_id,
+                    "material": ", ".join(fact.materials),
+                    "regime": ", ".join(fact.regimes),
+                    "property": normalized.property_name,
+                    "value": normalized.value,
+                    "raw_value": normalized.raw_value,
+                    "unit": normalized.unit,
+                    "value_original": normalized.value_original,
+                    "unit_original": normalized.unit_original,
+                    "value_normalized": normalized.value_normalized,
+                    "unit_normalized": normalized.unit_normalized,
+                    "normalization_family": normalized.normalization_family,
+                    "effect": normalized.effect,
+                    "equipment": ", ".join(fact.equipment),
+                    "laboratory": ", ".join(fact.laboratories),
+                    "source_chunk_id": fact.source_chunk_ids[0] if fact.source_chunk_ids else None,
+                    "doc_id": fact.evidence[0].document_id if fact.evidence else None,
+                    "evidence": [evidence.model_dump() for evidence in normalized.evidence or fact.evidence],
+                }
+                row["canonical_fact_key"] = canonical_fact_key_from_row(row)
+                rows.append(row)
+        return dedupe_fact_rows(rows)
 
     def _sources_from_experiments(self, facts: list[ExperimentFact]) -> list[dict[str, Any]]:
         return self._sources_from_evidence([evidence for fact in facts for evidence in fact.evidence])

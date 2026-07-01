@@ -420,6 +420,32 @@ class StructuredLLM:
         answer = obj.get("answer")
         return str(answer).strip() if answer else None
 
+    def repair_grounded_answer(self, repair_request: Dict[str, Any]) -> str | None:
+        """Ask the LLM for one grounded repair of an unsafe polished answer."""
+
+        if not self.enabled:
+            return None
+        system = (
+            "You repair a Russian technical answer after a grounding guard rejected it. "
+            "Return JSON only with key 'answer'. "
+            "Use only the allowed_* fields from the JSON payload. "
+            "Do not add new numbers, units, materials, regimes, properties, sources or conclusions. "
+            "If the allowed context is insufficient, say that grounded data is missing. "
+            "Do not include raw ids, doc ids, chunk ids, tracebacks or technical graph labels."
+        )
+        payload = {
+            "task": "Repair unsafe LLM-polished answer using only allowed grounded claims.",
+            "repair_request": repair_request,
+        }
+        content = self._chat(system, json.dumps(payload, ensure_ascii=False))
+        obj = self._parse_json_object(content or "")
+        if not obj:
+            if not self.last_error:
+                self.last_error = "llm_grounding_repair_json_parse_failed"
+            return None
+        answer = obj.get("answer")
+        return str(answer).strip() if answer else None
+
     def rewrite_question_for_retrieval(self, question: str) -> Dict[str, Any] | None:
         """Optional LLM query rewrite for messy user questions.
 

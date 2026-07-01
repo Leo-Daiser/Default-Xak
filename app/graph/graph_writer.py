@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from ..domain.aliases import MATERIAL_ALIASES, PROPERTY_ALIASES, REGIME_ALIASES
+from ..domain.fact_normalization import measurement_normalization_fields, with_normalized_measurement_fields
 from ..domain.ontology import DataGap, Evidence
 from ..extraction.deterministic import DeterministicExtractor
 from ..models.schemas import Chunk, Document
@@ -67,6 +68,7 @@ class GraphWriteStats:
     conclusions_written: set[str] = field(default_factory=set)
     gaps_written: set[str] = field(default_factory=set)
     relationships_written: int = 0
+    normalized_measurements_backfilled: int = 0
 
     def to_dict(self) -> dict[str, int | float]:
         mean_confidence = 0.0
@@ -96,6 +98,7 @@ class GraphWriteStats:
             "conclusions_written": len(self.conclusions_written),
             "gaps_written": len(self.gaps_written),
             "relationships_written": self.relationships_written,
+            "normalized_measurements_backfilled": self.normalized_measurements_backfilled,
         }
 
 
@@ -122,18 +125,70 @@ class GraphWriter:
         stats = GraphWriteStats()
         with self.graph_db.session() as session:
             for document in catalog.list_documents():
-                if hasattr(catalog, "is_document_active") and not catalog.is_document_active(document.doc_id):
+                active = catalog.is_document_active(document.doc_id) if hasattr(catalog, "is_document_active") else True
+                self.write_document(session, document, stats, active=active)
+                if not active:
+                    self.mark_document_chunks_active(session, document.doc_id, active=False)
                     continue
                 stats.documents_processed += 1
-                self.write_document(session, document, stats)
+                self.mark_document_chunks_active(session, document.doc_id, active=False)
                 for chunk in catalog.list_chunks(document.doc_id):
                     stats.chunks_processed += 1
                     if chunk.metadata.get("chunk_kind") == "table_row":
                         stats.tables_processed += 1
-                    self.write_chunk(session, document, chunk, stats)
+                    self.write_chunk(session, document, chunk, stats, active=True)
                     bundle = active_pipeline.extract_from_chunk(chunk)
                     self.write_bundle(session, bundle, stats)
+            self.backfill_normalized_measurements(session, stats)
         return stats.to_dict()
+
+    def backfill_normalized_measurements(self, session, stats: GraphWriteStats) -> None:
+        """Populate normalized fields on legacy Measurement nodes without deleting data."""
+
+        rows = list(
+            session.run(
+                """
+                MATCH (meas:Measurement)-[:OF_PROPERTY]->(p:Property)
+                WHERE meas.value IS NOT NULL
+                  AND (
+                    meas.value_original IS NULL OR
+                    meas.unit_original IS NULL OR
+                    meas.value_normalized IS NULL OR
+                    meas.unit_normalized IS NULL OR
+                    meas.normalization_family IS NULL
+                  )
+                RETURN meas.measurement_id AS measurement_id,
+                       meas.value AS value,
+                       meas.raw_value AS raw_value,
+                       meas.unit AS unit,
+                       p.canonical_name AS property
+                """
+            )
+        )
+        for row in rows:
+            measurement_id = _record_get(row, "measurement_id")
+            if not measurement_id:
+                continue
+            value = _record_get(row, "value")
+            raw_value = _record_get(row, "raw_value")
+            fields = measurement_normalization_fields(
+                _record_get(row, "property"),
+                value if value is not None else raw_value,
+                _record_get(row, "unit"),
+            )
+            session.run(
+                """
+                MATCH (meas:Measurement {measurement_id: $measurement_id})
+                SET meas.value_original = $value_original,
+                    meas.unit_original = $unit_original,
+                    meas.value_normalized = $value_normalized,
+                    meas.unit_normalized = $unit_normalized,
+                    meas.normalization_family = $normalization_family
+                """,
+                measurement_id=measurement_id,
+                **fields,
+            )
+            stats.normalized_measurements_backfilled += 1
 
     def write_bundle(self, session, bundle, stats: GraphWriteStats) -> None:
         """Write accepted extraction bundle facts. Rejected items are intentionally skipped."""
@@ -152,13 +207,15 @@ class GraphWriter:
         for gap in bundle_to_data_gaps(bundle):
             self.write_gap(session, gap, stats)
 
-    def write_document(self, session, document: Document, stats: GraphWriteStats) -> None:
+    def write_document(self, session, document: Document, stats: GraphWriteStats, *, active: bool = True) -> None:
         query = """
         MERGE (d:Document {document_id: $document_id})
         SET d.source_name = $source_name,
             d.title = $title,
             d.parser = $parser,
             d.status = $status,
+            d.version = $version,
+            d.active = $active,
             d.updated_at = datetime()
         """
         session.run(
@@ -168,14 +225,27 @@ class GraphWriter:
             title=document.title,
             parser=document.parser,
             status=document.status,
+            version=document.version,
+            active=bool(active),
         )
         stats.documents_written.add(document.doc_id)
 
-    def write_chunk(self, session, document: Document, chunk: Chunk, stats: GraphWriteStats) -> None:
+    def mark_document_chunks_active(self, session, document_id: str, *, active: bool) -> None:
+        session.run(
+            """
+            MATCH (:Document {document_id: $document_id})-[:HAS_CHUNK]->(c:DocumentChunk)
+            SET c.active = $active
+            """,
+            document_id=document_id,
+            active=bool(active),
+        )
+
+    def write_chunk(self, session, document: Document, chunk: Chunk, stats: GraphWriteStats, *, active: bool = True) -> None:
         query = """
         MERGE (d:Document {document_id: $document_id})
         SET d.source_name = coalesce(d.source_name, $source_name),
             d.title = coalesce(d.title, $source_name),
+            d.active = $active,
             d.updated_at = datetime()
         MERGE (c:DocumentChunk {chunk_id: $chunk_id})
         SET c.text = $text,
@@ -184,6 +254,8 @@ class GraphWriter:
             c.page_end = $page_end,
             c.section_path = $section_path,
             c.source_name = $source_name,
+            c.document_id = $document_id,
+            c.active = $active,
             c.updated_at = datetime()
         MERGE (d)-[:HAS_CHUNK]->(c)
         """
@@ -191,6 +263,7 @@ class GraphWriter:
             query,
             document_id=document.doc_id,
             source_name=document.title,
+            active=bool(active),
             chunk_id=chunk.chunk_id,
             text=chunk.text,
             page=chunk.page_start,
@@ -263,7 +336,8 @@ class GraphWriter:
             stats.regimes_written.add(regime)
             stats.relationships_written += 1
 
-        for measurement in experiment.measurements:
+        for raw_measurement in experiment.measurements:
+            measurement = with_normalized_measurement_fields(raw_measurement)
             material = experiment.materials[0] if experiment.materials else None
             regime = experiment.regimes[0] if experiment.regimes else None
             source_chunk_id = None
@@ -276,8 +350,8 @@ class GraphWriter:
                 material,
                 regime,
                 measurement.property_name,
-                measurement.value if measurement.value is not None else measurement.raw_value,
-                measurement.unit,
+                measurement.value_normalized if measurement.value_normalized is not None else measurement.value if measurement.value is not None else measurement.raw_value,
+                measurement.unit_normalized or measurement.unit,
                 source_chunk_id,
             )
             session.run(
@@ -290,6 +364,11 @@ class GraphWriter:
                 SET meas.value = $value,
                     meas.raw_value = $raw_value,
                     meas.unit = $unit,
+                    meas.value_original = $value_original,
+                    meas.unit_original = $unit_original,
+                    meas.value_normalized = $value_normalized,
+                    meas.unit_normalized = $unit_normalized,
+                    meas.normalization_family = $normalization_family,
                     meas.effect = $effect,
                     meas.baseline_value = $baseline_value,
                     meas.delta_abs = $delta_abs,
@@ -306,6 +385,11 @@ class GraphWriter:
                 value=measurement.value,
                 raw_value=measurement.raw_value,
                 unit=measurement.unit,
+                value_original=measurement.value_original,
+                unit_original=measurement.unit_original,
+                value_normalized=measurement.value_normalized,
+                unit_normalized=measurement.unit_normalized,
+                normalization_family=measurement.normalization_family,
                 effect=measurement.effect,
                 baseline_value=measurement.baseline_value,
                 delta_abs=measurement.delta_abs,
@@ -464,6 +548,8 @@ class GraphWriter:
             SET c.text = coalesce($quote, c.text),
                 c.page = $page,
                 c.source_name = $source_name,
+                c.document_id = $document_id,
+                c.active = coalesce(c.active, true),
                 c.updated_at = datetime()
             MERGE (d)-[:HAS_CHUNK]->(c)
             """,
@@ -503,3 +589,12 @@ def _aliases_for(canonical: str, aliases: dict[str, str]) -> list[str]:
 def _stable_id(prefix: str, *parts: object) -> str:
     raw = "|".join("" if part is None else str(part) for part in parts)
     return f"{prefix}_{hashlib.sha1(raw.encode('utf-8')).hexdigest()[:32]}"
+
+
+def _record_get(record, key: str):
+    try:
+        return record[key]
+    except Exception:
+        if isinstance(record, dict):
+            return record.get(key)
+        return getattr(record, key, None)

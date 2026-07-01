@@ -7,6 +7,7 @@ import re
 from typing import Any, Callable, Iterable, Protocol
 
 from ..config import settings
+from ..domain.fact_normalization import dedupe_measurements
 from ..domain.normalization import canonical_material, canonical_property, canonical_regime, material_matches, property_matches, regime_matches
 from ..domain.ontology import DataGap, Evidence
 from ..extraction.extraction import EntityRelationExtractor
@@ -297,12 +298,18 @@ class CatalogGraphRepository:
         for item in experiments.values():
             if not item["materials"] and not item["regimes"] and not item["measurements"]:
                 continue
+            materials = _unique(item["materials"])
+            regimes = _unique(item["regimes"])
             built.append(
                 ExperimentFact(
                     experiment_id=item["experiment_id"],
-                    materials=_unique(item["materials"]),
-                    regimes=_unique(item["regimes"]),
-                    measurements=item["measurements"],
+                    materials=materials,
+                    regimes=regimes,
+                    measurements=dedupe_measurements(
+                        item["measurements"],
+                        material=materials[0] if materials else None,
+                        regime=regimes[0] if regimes else None,
+                    ),
                     equipment=_unique(item["equipment"]),
                     laboratories=_unique(item["laboratories"]),
                     conclusions=_unique(item["conclusions"]),
@@ -374,6 +381,8 @@ class CatalogGraphRepository:
         return self._gaps or []
 
     def _source_name(self, chunk: Chunk) -> str:
+        if chunk.metadata.get("source_name"):
+            return str(chunk.metadata.get("source_name"))
         if chunk.metadata.get("filename"):
             return str(chunk.metadata.get("filename"))
         doc = self.document_getter(chunk.doc_id) if self.document_getter else None

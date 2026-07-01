@@ -44,7 +44,7 @@ class TableExtractor:
 
     def extract_from_chunk(self, chunk: Chunk) -> ExtractionBundle:
         row = parse_serialized_row(chunk.text or "")
-        source_name = str(chunk.metadata.get("filename") or chunk.doc_id)
+        source_name = str(chunk.metadata.get("source_name") or chunk.metadata.get("filename") or chunk.doc_id)
         bundle = ExtractionBundle(document_id=chunk.doc_id, source_name=source_name, extractor_version=self.extractor_version)
         quote = chunk.text.strip()
         if not row:

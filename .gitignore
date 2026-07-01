@@ -8,6 +8,7 @@ __pycache__/
 /data/parser_audit/
 /volumes/
 /dist/
+/artifacts/
 *.log
 *.sqlite3
 .DS_Store

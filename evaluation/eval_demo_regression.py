@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.graph.answer_graph import build_answer_graph  # noqa: E402
+from app.answering.grounding_guard import validate_text_against_payload  # noqa: E402
 from app.ui_helpers import answer_evidence_summary_rows  # noqa: E402
 
 
@@ -128,6 +129,22 @@ def _generic_errors(payload: dict[str, Any]) -> list[str]:
         errors.append(f"answer graph raw label leaks: {graph['raw_label_leaks']}")
     if evidence_summary_has_raw_ids(payload):
         errors.append("evidence summary contains raw doc/chunk ids")
+    guard_check = validate_text_against_payload(answer, payload)
+    if guard_check.violations:
+        kinds = ", ".join(sorted({item["kind"] for item in guard_check.violations}))
+        errors.append(f"main answer has unsupported grounded-claim violations: {kinds}")
+    if diagnostics.get("llm_answer_polished"):
+        llm_guard = diagnostics.get("llm_grounding_guard")
+        if not isinstance(llm_guard, dict):
+            errors.append("LLM polish used but diagnostics.llm_grounding_guard is missing")
+        elif llm_guard.get("status") not in {"pass", "repaired", "fallback", "skipped"}:
+            errors.append(f"unexpected LLM grounding guard status: {llm_guard.get('status')}")
+        elif llm_guard.get("status") == "pass" and int(llm_guard.get("violations_count") or 0):
+            errors.append("LLM grounding guard passed with non-zero violations")
+        elif llm_guard.get("status") == "repaired" and (
+            not llm_guard.get("repair_attempted") or not llm_guard.get("repair_passed")
+        ):
+            errors.append("LLM grounding guard repaired status without successful repair flags")
     errors.extend(friendly_source_warnings(payload))
     return errors
 
@@ -303,9 +320,18 @@ def validate_case(case: DemoCase, payload: dict[str, Any]) -> dict[str, Any]:
         "conflict_count": _conflict_count(payload),
         "answer_mode": payload.get("answer_mode"),
         "status": payload.get("status"),
+        "llm_grounding_guard_status": _guard(payload).get("status", "skipped"),
+        "guard_repair_attempted": bool(_guard(payload).get("repair_attempted")),
+        "guard_fallback_used": _guard(payload).get("status") == "fallback",
+        "guard_violations_count": int(_guard(payload).get("violations_count") or 0),
         "warnings": warnings,
     }
     return row
+
+
+def _guard(payload: dict[str, Any]) -> dict[str, Any]:
+    guard = _diagnostics(payload).get("llm_grounding_guard")
+    return guard if isinstance(guard, dict) else {"status": "skipped"}
 
 
 def run_eval(api_base: str = DEFAULT_API_BASE) -> tuple[dict[str, Any], int]:
@@ -365,6 +391,10 @@ def run_eval(api_base: str = DEFAULT_API_BASE) -> tuple[dict[str, Any], int]:
         "rows": rows,
         "failures_count": len(failed),
         "warnings_count": sum(len(row.get("warnings") or []) for row in rows),
+        "guard_pass_count": sum(row.get("llm_grounding_guard_status") == "pass" for row in rows),
+        "guard_repaired_count": sum(row.get("llm_grounding_guard_status") == "repaired" for row in rows),
+        "guard_fallback_count": sum(row.get("llm_grounding_guard_status") == "fallback" for row in rows),
+        "total_violations_blocked": sum(int(row.get("guard_violations_count") or 0) for row in rows),
     }
     return result, 1 if failed else 0
 
@@ -384,8 +414,15 @@ def main() -> int:
             f"[{label}] {row['case_id']}: {reason} | "
             f"raw_leaks={row['raw_leaks_count']} graph={row['graph_nodes']}/{row['graph_edges']} "
             f"evidence={row['evidence_count']} conflicts={row['conflict_count']} "
+            f"guard={row.get('llm_grounding_guard_status', 'skipped')} "
+            f"repair={int(bool(row.get('guard_repair_attempted')))} "
+            f"fallback={int(bool(row.get('guard_fallback_used')))} "
+            f"violations={row.get('guard_violations_count', 0)} "
             f"warnings={len(row.get('warnings') or [])}"
         )
+    for key in ["guard_pass_count", "guard_repaired_count", "guard_fallback_count", "total_violations_blocked"]:
+        if key in result:
+            print(f"{key}: {result[key]}")
     print(f"JSON report: {ARTIFACT_PATH}")
     return exit_code
 

@@ -1,0 +1,265 @@
+- generic [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e7]:
+      - generic [ref=e219]:
+        - img "Running..." [ref=e220]
+        - generic [ref=e221]: Running...
+        - button "Stop" [ref=e223] [cursor=pointer]
+      - button "Deploy" [ref=e9] [cursor=pointer]:
+        - generic [ref=e11]: Deploy
+      - button [ref=e13] [cursor=pointer]:
+        - img [ref=e14]
+  - generic [ref=e4]:
+    - generic [ref=e24]:
+      - heading "Состояние" [level=3] [ref=e28]
+      - paragraph [ref=e32]: "API: ok"
+      - paragraph [ref=e36]: "KG backend: neo4j"
+      - paragraph [ref=e40]: "Активных документов: 18"
+      - paragraph [ref=e44]: "Активных chunks: 450"
+      - paragraph [ref=e48]: "LLM: готов"
+      - group [ref=e50]:
+        - generic "Advanced diagnostics" [ref=e51] [cursor=pointer]:
+          - paragraph [ref=e54]: Advanced diagnostics
+          - img [ref=e55]
+    - generic [ref=e62]:
+      - heading "Scientific Knowledge Graph" [level=1] [ref=e67]: Scientific Knowledge Graph
+      - paragraph [ref=e72]: Система связывает документы, эксперименты, материалы, режимы, свойства, оборудование, лаборатории, выводы и пробелы в данных.
+      - generic [ref=e74]:
+        - paragraph [ref=e77]: Режим работы
+        - radiogroup "Режим работы" [ref=e78] [cursor=pointer]:
+          - generic [ref=e79]:
+            - radio "Лучший ответ" [checked]
+            - paragraph [ref=e84]: Лучший ответ
+          - generic [ref=e85]:
+            - radio "Строгая проверка"
+            - paragraph [ref=e90]: Строгая проверка
+          - generic [ref=e91]:
+            - radio "Офлайн-режим"
+            - paragraph [ref=e96]: Офлайн-режим
+      - generic [ref=e99]:
+        - paragraph [ref=e103]:
+          - strong [ref=e104]: Расширение базы знаний
+        - generic [ref=e105]:
+          - generic [ref=e111]:
+            - paragraph [ref=e115]: Активные документы
+            - generic [ref=e117]: "18"
+          - generic [ref=e123]:
+            - paragraph [ref=e127]: Canonical facts
+            - generic [ref=e129]: "50"
+          - generic [ref=e135]:
+            - paragraph [ref=e139]: Новые связи
+            - generic [ref=e141]: "4"
+          - generic [ref=e147]:
+            - paragraph [ref=e151]: Конфликты
+            - generic [ref=e153]: "5"
+          - generic [ref=e159]:
+            - paragraph [ref=e163]: Пробелы данных
+            - generic [ref=e165]: "4"
+        - paragraph [ref=e169]: "Последнее обновление: 2026-06-30 05:54:18"
+      - group [ref=e171]:
+        - generic "Документы" [ref=e172] [cursor=pointer]:
+          - paragraph [ref=e175]: Документы
+          - img [ref=e176]
+      - group [ref=e180]:
+        - generic "Примеры вопросов" [ref=e181] [cursor=pointer]:
+          - paragraph [ref=e184]: Примеры вопросов
+          - img [ref=e185]
+      - generic [ref=e189]:
+        - paragraph [ref=e192]: Введите исследовательский вопрос
+        - textbox "Введите исследовательский вопрос" [ref=e195]:
+          - /placeholder: ""
+          - text: Что делали по сплаву ВТ6 при отжиге и какой был эффект на прочность?
+      - button "Найти ответ" [active] [ref=e198] [cursor=pointer]:
+        - paragraph [ref=e200]: Найти ответ
+      - generic [ref=e224]:
+        - generic [ref=e228]:
+          - heading "Ответ" [level=3] [ref=e233]: Ответ
+          - generic [ref=e237]:
+            - heading "Подтверждённые экспериментальные данные" [level=3] [ref=e239]: Подтверждённые экспериментальные данные
+            - paragraph [ref=e241]: "По ВТ6 при режиме отжиг найдены подтверждённые данные по свойству прочность. Основной численный диапазон в найденных фактах: 827-1120 MPa."
+            - paragraph [ref=e242]:
+              - strong [ref=e243]: "Что найдено:"
+            - list [ref=e244]:
+              - listitem [ref=e245]: "ВТ6: отжиг; прочность: 1120 MPa; эффект: рост."
+              - listitem [ref=e246]: "ВТ6: отжиг; прочность: 980 MPa; эффект: снижение."
+              - listitem [ref=e247]: "ВТ6: отжиг; прочность: 980 MPa; направление эффекта не указано явно."
+              - listitem [ref=e248]: "ВТ6: отжиг; прочность: 827 MPa; направление эффекта не указано явно."
+              - listitem [ref=e249]: "ВТ6: отжиг; прочность: 896 MPa; направление эффекта не указано явно."
+            - paragraph [ref=e250]:
+              - strong [ref=e251]: "Ограничения:"
+            - list [ref=e252]:
+              - listitem [ref=e253]: Найдено несколько значений или эффектов; результат зависит от конкретного режима, источника и исходного состояния материала.
+              - listitem [ref=e254]: В части фактов направление эффекта не указано явно.
+              - listitem [ref=e255]: "В корпусе найдены разные значения прочности для ВТ6 после отжига: 1120 MPa и 980 MPa и 827 MPa. Это может быть связано с различиями в параметрах режима, источниках или исходном состоянии материала."
+            - paragraph [ref=e256]:
+              - strong [ref=e257]: "Вывод:"
+              - text: По корпусу нельзя утверждать, что любой режим отжиг для ВТ6 одинаково влияет на прочность; подтверждённый эффект зависит от параметров режима и источника.
+            - paragraph [ref=e258]:
+              - strong [ref=e259]: "Уверенность:"
+              - text: средняя
+          - generic [ref=e260]:
+            - generic [ref=e266]:
+              - paragraph [ref=e270]: Статус
+              - generic [ref=e272]: Найдены подтверждённые данные
+            - generic [ref=e278]:
+              - paragraph [ref=e282]: Факты
+              - generic [ref=e284]: "11"
+            - generic [ref=e290]:
+              - paragraph [ref=e294]: Источники
+              - generic [ref=e296]: "7"
+            - generic [ref=e302]:
+              - paragraph [ref=e306]: Evidence
+              - generic [ref=e308]: "7"
+            - generic [ref=e314]:
+              - paragraph [ref=e318]: Узлы графа
+              - generic [ref=e320]: "32"
+          - paragraph [ref=e324]:
+            - strong [ref=e325]: Основание ответа
+          - list [ref=e329]:
+            - listitem [ref=e330]:
+              - paragraph [ref=e331]:
+                - strong [ref=e332]: "ВТ6 · отжиг · прочность: 1120 MPa"
+              - paragraph [ref=e333]: "Источник: Материал по ВТ6"
+              - paragraph [ref=e334]: "Фрагмент: \"experiment_id: API-NEO4J-VT6. Material: сплав ВТ6. Process: отжиг 900 C 2 h. Property: прочность. Result: прочность повышена to 1120 MPa\""
+          - list [ref=e338]:
+            - listitem [ref=e339]:
+              - paragraph [ref=e340]:
+                - strong [ref=e341]: "ВТ6 · отжиг · прочность: 980 MPa"
+              - paragraph [ref=e342]: "Источник: Экспериментальные данные по ВТ6"
+              - paragraph [ref=e343]: "Фрагмент: \"материал: ВТ6; режим: отжиг; свойство: прочность; значение: 980; единица: MPa; эффект: снижена; вывод: Вывод: отжиг ВТ6 снизил прочность, но повысил пластичность до 14 %\""
+          - list [ref=e347]:
+            - listitem [ref=e348]:
+              - paragraph [ref=e349]:
+                - strong [ref=e350]: "ВТ6 · отжиг · прочность: 980 MPa"
+              - paragraph [ref=e351]: "Источник: Статья по ВТ6"
+              - paragraph [ref=e352]: "Фрагмент: \"эксперимент: VT6-AN-TXT Material: сплав ВТ6. Process: отжиг at 750 C for 2 h. Equipment: Вакуумная печь SNOL-75. Laboratory: Лаборатория легких сплавов. Property: прочность. Resul…\""
+          - list [ref=e356]:
+            - listitem [ref=e357]:
+              - paragraph [ref=e358]:
+                - strong [ref=e359]: "ВТ6 · отжиг · прочность: 827 MPa"
+              - paragraph [ref=e360]: "Источник: Материал по ВТ6"
+              - paragraph [ref=e361]: "Фрагмент: \"| | | | | | | | | | --- | --- | --- | --- | --- | --- | --- | --- | | Material | Diameter | Tensile Strength min | | Yield Strength | | Elongation in 2\" | Reduction of Area % | | …\""
+          - list [ref=e365]:
+            - listitem [ref=e366]:
+              - paragraph [ref=e367]:
+                - strong [ref=e368]: "ВТ6 · отжиг · прочность: 896 MPa"
+              - paragraph [ref=e369]: "Источник: Материал по ВТ6"
+              - paragraph [ref=e370]: "Фрагмент: \"| | | | | | | | | | --- | --- | --- | --- | --- | --- | --- | --- | | Material | Diameter | Tensile Strength min | | Yield Strength | | Elongation in 2\" | Reduction of Area % | | …\""
+          - paragraph [ref=e374]:
+            - strong [ref=e375]: Неоднородность данных
+          - alert [ref=e378]:
+            - paragraph [ref=e383]: "Для ВТ6 после отжига найдены разные значения прочности: 1120 MPa и 980 MPa и 827 MPa и 896 MPa. Возможная причина: источники по-разному описывают качественный эффект"
+        - generic [ref=e387]:
+          - generic [ref=e388]:
+            - heading "Интерактивный связанный граф" [level=3] [ref=e397]: Интерактивный связанный граф
+            - button "Развернуть карту" [ref=e405] [cursor=pointer]:
+              - paragraph [ref=e407]: Развернуть карту
+          - iframe [ref=e409]:
+            - generic [ref=f1e2]:
+              - generic [ref=f1e3]: Карта ответа
+              - generic [ref=f1e4]: Колесо — масштаб · фон — перемещение карты · узлы зафиксированы
+              - img [ref=f1e5]:
+                - generic [ref=f1e6]:
+                  - generic "ВТ6 титановый сплав аналог Ti-6Al-4V" [ref=f1e12]:
+                    - generic: ВТ6титановый сплаваналог Ti-6Al-4V
+                  - generic "отжиг термообработка" [ref=f1e14]:
+                    - generic: Отжигтермообработка
+                  - generic "прочность диапазон/значения MPa" [ref=f1e16]:
+                    - generic: Прочностьдиапазон/значенияMPa
+                  - generic "827–1120 MPa 5 фактов сводка измерений ВТ6; отжиг; прочность; 1120 MPa рост ВТ6; отжиг; прочность; 980 MPa снижение ВТ6; отжиг; прочность; 980 MPa эффект не указан ВТ6; отжиг; прочность; 827 MPa эффект не указан ВТ6; отжиг; прочность; 896 MPa эффект не указан" [ref=f1e18]:
+                    - generic: 827–1120 MPa 5фактовсводка измерений
+                  - generic "1120 MPa рост подтверждённый факт ВТ6; отжиг; прочность; 1120 MPa рост" [ref=f1e20]:
+                    - generic: 1120 MPa ростподтверждённый факт
+                  - generic "980 MPa снижение подтверждённый факт ВТ6; отжиг; прочность; 980 MPa снижение" [ref=f1e22]:
+                    - generic: 980 MPa снижениеподтверждённый факт
+                  - generic "980 MPa эффект не указан подтверждённый факт ВТ6; отжиг; прочность; 980 MPa эффект не указан" [ref=f1e24]:
+                    - generic: 980 MPa эффект неуказанподтверждённый факт
+                  - generic "7 источников подтверждают данные" [ref=f1e26]:
+                    - generic: 7 источниковподтверждают данные
+          - separator [ref=e413]
+          - generic [ref=e414]:
+            - generic [ref=e418]:
+              - heading "Карта происхождения ответа" [level=3] [ref=e423]: Карта происхождения ответа
+              - paragraph [ref=e428]: Показывает, какие сущности, факты и источники сформировали ответ. Дубли объединены, технические идентификаторы доступны в аудите.
+            - button "Развернуть карту происхождения" [ref=e435] [cursor=pointer]:
+              - paragraph [ref=e437]: Развернуть карту происхождения
+          - generic [ref=e438]:
+            - generic [ref=e445] [cursor=pointer]:
+              - checkbox "Источники/evidence" [checked]
+              - paragraph [ref=e450]: Источники/evidence
+            - generic [ref=e457] [cursor=pointer]:
+              - checkbox "Пробелы данных" [checked]
+              - paragraph [ref=e462]: Пробелы данных
+            - generic [ref=e469] [cursor=pointer]:
+              - checkbox "Конфликты" [checked]
+              - paragraph [ref=e474]: Конфликты
+            - generic [ref=e481] [cursor=pointer]:
+              - checkbox "Измерения" [checked]
+              - paragraph [ref=e486]: Измерения
+            - generic [ref=e493] [cursor=pointer]:
+              - checkbox "Только активные" [checked]
+              - paragraph [ref=e498]: Только активные
+          - iframe [ref=e500]:
+            - generic [ref=f2e2]:
+              - generic [ref=f2e3]: Колесо — масштаб · фон — перемещение карты · узлы зафиксированы
+              - img [ref=f2e4]:
+                - generic [ref=f2e5]:
+                  - generic "вопрос" [ref=f2e24]:
+                    - generic: "Вопрос: противоречияВТ6 · отжиг ·прочность"
+                  - 'generic "Фокус ответа: извлеченные ограничения и найденные сущности" [ref=f2e26]':
+                    - generic: Фокус ответанеоднородные факты
+                  - 'generic "Тип: материал; ВТ6; aliases: Ti-6Al-4V, VT6" [ref=f2e28]':
+                    - generic: ВТ6титановый сплав
+                  - 'generic "Свойство: прочность" [ref=f2e30]':
+                    - generic: ПрочностьMPa
+                  - 'generic "Режим: отжиг" [ref=f2e32]':
+                    - generic: Отжигтермообработка
+                  - 'generic "Материал: ВТ6; Режим: отжиг; Свойство: прочность; Ключ: вт6|отжиг|прочность|1120|mpa|increase; Источники: Источник из корпуса, Данные по термообработке ВТ6" [ref=f2e34]':
+                    - generic: Прочность1120 MPaрост · 3 источника
+                  - 'generic "Материал: ВТ6; Режим: отжиг; Свойство: прочность; Ключ: вт6|отжиг|прочность|980|mpa|decrease; Источники: Данные экспериментов, Статья по ВТ6, Источник из корпуса" [ref=f2e36]':
+                    - generic: Прочность980 MPaснижение · 4 источника
+                  - 'generic "Материал: ВТ6; Режим: отжиг; Свойство: прочность; Ключ: вт6|отжиг|прочность|980|mpa|; Источники: Статья по ВТ6, Источник из корпуса" [ref=f2e38]':
+                    - generic: Прочность980 MPaне указано · 2
+                  - 'generic "Материал: ВТ6; Режим: отжиг; Свойство: прочность; Ключ: вт6|отжиг|прочность|827|mpa|; Источники: Материал по Ti-6Al-4V, Источник из корпуса" [ref=f2e40]':
+                    - generic: Прочность827 MPaне указано · 2
+                  - 'generic "Материал: ВТ6; Режим: отжиг; Свойство: прочность; Ключ: вт6|отжиг|прочность|896|mpa|; Источники: Материал по Ti-6Al-4V, Источник из корпуса" [ref=f2e42]':
+                    - generic: Прочность896 MPaне указано · 2
+                  - 'generic "Источники: Источник из корпуса, Данные по термообработке ВТ6, Данные экспериментов, Статья по ВТ6, Материал по Ti-6Al-4V; Фрагменты: Эксперимент_id: API-NEO4J-VT6. Material: сплав ВТ6. Process: отжиг 900 C 2 h. P… | Table: Table columns: Эксперимент_id | material | process_regime | temperature_… | Table: Table columns: Эксперимент_id | material | process_regime | temperature_…" [ref=f2e44]':
+                    - generic: Источники12 подтверждений
+                  - generic "ВТ6; отжиг; прочность; 1120 MPa ↔ 980 MPa ↔ 827 MPa ↔ 896 MPa" [ref=f2e46]:
+                    - generic: Неоднородность1120 MPa ↔ 980 MPa ↔827 MPa ↔ …
+                  - generic "Итоговый статус ответа" [ref=f2e48]:
+                    - generic: Выводусловия неоднородны
+          - paragraph [ref=e504]: Показаны ключевые связи ответа. Полные raw-данные доступны в аудите.
+          - group [ref=e506]:
+            - generic "Аудит графа" [ref=e507] [cursor=pointer]:
+              - paragraph [ref=e510]: Аудит графа
+              - img [ref=e511]
+      - group [ref=e515]:
+        - generic "Основание фактов" [ref=e516] [cursor=pointer]:
+          - paragraph [ref=e519]: Основание фактов
+          - img [ref=e520]
+      - group [ref=e524]:
+        - generic "Проверенные факты" [ref=e525] [cursor=pointer]:
+          - paragraph [ref=e528]: Проверенные факты
+          - img [ref=e529]
+      - group [ref=e533]:
+        - generic "Источники и evidence" [ref=e534] [cursor=pointer]:
+          - paragraph [ref=e537]: Источники и evidence
+          - img [ref=e538]
+      - group [ref=e542]:
+        - generic "История решений" [ref=e543] [cursor=pointer]:
+          - paragraph [ref=e546]: История решений
+          - img [ref=e547]
+      - group [ref=e551]:
+        - generic "Пробелы в данных" [ref=e552] [cursor=pointer]:
+          - paragraph [ref=e555]: Пробелы в данных
+          - img [ref=e556]
+      - group [ref=e560]:
+        - generic "Частичные совпадения" [ref=e561] [cursor=pointer]:
+          - paragraph [ref=e564]: Частичные совпадения
+          - img [ref=e565]
+      - group [ref=e569]:
+        - generic "Диагностика" [ref=e570] [cursor=pointer]:
+          - paragraph [ref=e573]: Диагностика
+          - img [ref=e574]

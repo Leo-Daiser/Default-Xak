@@ -60,6 +60,47 @@ def main() -> int:
         if not exact:
             print("Neo4j graph smoke failed: exact ВТ6 + отжиг + прочность not found")
             return 1
+        if not any(
+            measurement.value_normalized is not None
+            and measurement.unit_normalized
+            and measurement.value_original is not None
+            and measurement.unit_original
+            and measurement.normalization_family
+            for fact in exact
+            for measurement in fact.measurements
+        ):
+            print("Neo4j graph smoke failed: normalized measurement fields missing after read")
+            return 1
+        normalized_rows = graph_db.run(
+            """
+            MATCH (meas:Measurement)
+            WHERE meas.value IS NOT NULL
+            RETURN
+              count(meas) AS total,
+              sum(CASE WHEN
+                meas.value_original IS NULL OR
+                meas.unit_original IS NULL OR
+                meas.value_normalized IS NULL OR
+                meas.unit_normalized IS NULL OR
+                meas.normalization_family IS NULL
+              THEN 1 ELSE 0 END) AS missing_normalized
+            """
+        )
+        if normalized_rows:
+            total = int(normalized_rows[0]["total"] or 0)
+            missing = int(normalized_rows[0]["missing_normalized"] or 0)
+            if total > 0 and missing > 0:
+                print(f"Neo4j graph smoke failed: {missing}/{total} Measurement nodes lack normalized fields")
+                return 1
+        evidence_rows = graph_db.run(
+            """
+            MATCH (:Measurement)-[:SUPPORTED_BY]->(:DocumentChunk)
+            RETURN count(*) AS evidence_edges
+            """
+        )
+        if not evidence_rows or int(evidence_rows[0]["evidence_edges"] or 0) <= 0:
+            print("Neo4j graph smoke failed: measurement evidence links are missing")
+            return 1
         missing = repository.find_exact_material_regime_property("ВТ6", "криообработка", "вязкость")
         if missing:
             print("Neo4j graph smoke failed: missing ВТ6 + криообработка + вязкость returned exact facts")
@@ -75,4 +116,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

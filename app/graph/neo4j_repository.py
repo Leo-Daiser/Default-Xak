@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..domain.fact_normalization import measurement_normalization_fields
 from ..domain.normalization import canonical_material, canonical_property, canonical_regime
 from ..domain.ontology import DataGap, Evidence, Measurement
 from .explorer import (
@@ -213,12 +214,23 @@ class Neo4jGraphRepository:
             property_node = _map_get(item, "property")
             if measurement_node is None or property_node is None:
                 continue
+            property_name = canonical_property(_node_prop(property_node, "canonical_name"))
+            fields = measurement_normalization_fields(
+                property_name,
+                _node_prop(measurement_node, "value"),
+                _node_prop(measurement_node, "unit"),
+            )
             measurements.append(
                 Measurement(
-                    property_name=canonical_property(_node_prop(property_node, "canonical_name")),
+                    property_name=property_name,
                     value=_node_prop(measurement_node, "value"),
                     raw_value=_node_prop(measurement_node, "raw_value"),
                     unit=_node_prop(measurement_node, "unit"),
+                    value_original=_node_prop(measurement_node, "value_original") if _node_prop(measurement_node, "value_original") is not None else fields["value_original"],
+                    unit_original=_node_prop(measurement_node, "unit_original") or fields["unit_original"],
+                    value_normalized=_node_prop(measurement_node, "value_normalized") if _node_prop(measurement_node, "value_normalized") is not None else fields["value_normalized"],
+                    unit_normalized=_node_prop(measurement_node, "unit_normalized") or fields["unit_normalized"],
+                    normalization_family=_node_prop(measurement_node, "normalization_family") or fields["normalization_family"],
                     effect=_node_prop(measurement_node, "effect"),
                     baseline_value=_node_prop(measurement_node, "baseline_value"),
                     delta_abs=_node_prop(measurement_node, "delta_abs"),

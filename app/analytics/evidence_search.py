@@ -91,7 +91,7 @@ def _retrieval_backend_name(engine: RetrievalEngine) -> str:
 def _chunk_to_evidence(chunk: Chunk, score: float, backend: str) -> EvidenceItem:
     metadata = chunk.metadata or {}
     return EvidenceItem(
-        source_name=str(metadata.get("filename") or metadata.get("source_name") or chunk.doc_id),
+        source_name=str(metadata.get("source_name") or metadata.get("filename") or chunk.doc_id),
         document_id=chunk.doc_id,
         chunk_id=chunk.chunk_id,
         page=chunk.page_start,

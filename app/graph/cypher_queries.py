@@ -12,7 +12,9 @@ OPTIONAL MATCH (e)-[:PERFORMED_BY]->(team:ResearchTeam)
 OPTIONAL MATCH (team)-[:BELONGS_TO]->(lab_from_team:Laboratory)
 OPTIONAL MATCH (e)-[:PERFORMED_AT]->(lab_direct:Laboratory)
 OPTIONAL MATCH (e)-[:LED_TO]->(concl:Conclusion)
-OPTIONAL MATCH (e)-[:SUPPORTED_BY]->(chunk:DocumentChunk)<-[:HAS_CHUNK]-(doc:Document)
+MATCH (e)-[:SUPPORTED_BY]->(chunk:DocumentChunk)<-[:HAS_CHUNK]-(doc:Document)
+WHERE coalesce(doc.active, true) = true
+  AND coalesce(chunk.active, true) = true
 RETURN e,
        collect(DISTINCT m) AS materials,
        collect(DISTINCT r) AS regimes,
@@ -41,7 +43,9 @@ OPTIONAL MATCH (e)-[:PERFORMED_BY]->(team:ResearchTeam)
 OPTIONAL MATCH (team)-[:BELONGS_TO]->(lab_from_team:Laboratory)
 OPTIONAL MATCH (e)-[:PERFORMED_AT]->(lab_direct:Laboratory)
 OPTIONAL MATCH (e)-[:LED_TO]->(concl:Conclusion)
-OPTIONAL MATCH (e)-[:SUPPORTED_BY]->(chunk:DocumentChunk)<-[:HAS_CHUNK]-(doc:Document)
+MATCH (e)-[:SUPPORTED_BY]->(chunk:DocumentChunk)<-[:HAS_CHUNK]-(doc:Document)
+WHERE coalesce(doc.active, true) = true
+  AND coalesce(chunk.active, true) = true
 RETURN e,
        materials,
        regimes,
@@ -66,7 +70,9 @@ OPTIONAL MATCH (e)-[:PERFORMED_BY]->(team:ResearchTeam)
 OPTIONAL MATCH (team)-[:BELONGS_TO]->(lab_from_team:Laboratory)
 OPTIONAL MATCH (e)-[:PERFORMED_AT]->(lab_direct:Laboratory)
 OPTIONAL MATCH (e)-[:LED_TO]->(concl:Conclusion)
-OPTIONAL MATCH (e)-[:SUPPORTED_BY]->(chunk:DocumentChunk)<-[:HAS_CHUNK]-(doc:Document)
+MATCH (e)-[:SUPPORTED_BY]->(chunk:DocumentChunk)<-[:HAS_CHUNK]-(doc:Document)
+WHERE coalesce(doc.active, true) = true
+  AND coalesce(chunk.active, true) = true
 RETURN e,
        collect(DISTINCT m) AS materials,
        collect(DISTINCT r) AS regimes,
@@ -85,7 +91,9 @@ MATCH (g:DataGap)
 OPTIONAL MATCH (g)-[:GAP_FOR_ENTITY]->(m:Material)
 OPTIONAL MATCH (g)-[:GAP_FOR_REGIME]->(r:ProcessRegime)
 OPTIONAL MATCH (g)-[:GAP_FOR_PROPERTY]->(p:Property)
-OPTIONAL MATCH (g)-[:SUPPORTED_BY]->(chunk:DocumentChunk)<-[:HAS_CHUNK]-(doc:Document)
+MATCH (g)-[:SUPPORTED_BY]->(chunk:DocumentChunk)<-[:HAS_CHUNK]-(doc:Document)
+WHERE coalesce(doc.active, true) = true
+  AND coalesce(chunk.active, true) = true
 WITH g,
      collect(DISTINCT m) AS materials,
      collect(DISTINCT r) AS regimes,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from .models import (
@@ -15,7 +16,7 @@ from .models import (
 from .resolver import resolve_unit
 
 
-VALID_UNITS = {"MPa", "GPa", "HV", "HRC", "%", "C", "h", "min"}
+VALID_UNITS = {"MPa", "GPa", "ksi", "HV", "HRC", "%", "C", "h", "min"}
 
 
 @dataclass
@@ -51,6 +52,8 @@ def validate_measurement(measurement: ExtractedMeasurement) -> tuple[ExtractedMe
         return None, _reject("measurement", "property_unit_mismatch", measurement)
     if measurement.property_canonical == "пластичность" and unit in {"MPa", "GPa"}:
         return None, _reject("measurement", "property_unit_mismatch", measurement)
+    if measurement.value is not None and not _property_near_value(measurement):
+        return None, _reject("measurement", "value_without_property_window", measurement)
     if unit and unit in VALID_UNITS:
         measurement = measurement.model_copy(update={"unit": unit}) if hasattr(measurement, "model_copy") else measurement.copy(update={"unit": unit})
     return measurement, None
@@ -127,3 +130,20 @@ def _reject(item_type: str, reason: str, item) -> RejectedExtraction:
 def _gap_signal(evidence: list[EvidenceSpan]) -> bool:
     text = " ".join(item.quote for item in evidence).lower().replace("ё", "е")
     return any(marker in text for marker in ["нет данных", "не измер", "отсутств", "missing data", "not measured"])
+
+
+def _property_near_value(measurement: ExtractedMeasurement) -> bool:
+    text = " ".join(item.quote for item in measurement.evidence if item.quote).lower().replace("ё", "е")
+    if not text:
+        return False
+    value = f"{float(measurement.value):g}" if measurement.value is not None else ""
+    value_match = re.search(re.escape(value), text) if value else None
+    if not value_match:
+        return True
+    terms = [measurement.property_raw, measurement.property_canonical]
+    if measurement.property_canonical == "прочность":
+        terms.extend(["прочност", "tensile strength", "ultimate tensile strength", "strength"])
+    if measurement.property_canonical == "коррозионная стойкость":
+        terms.extend(["коррозион", "corrosion resistance"])
+    window = text[max(0, value_match.start() - 100): value_match.end() + 100]
+    return any(str(term or "").lower().replace("ё", "е") in window for term in terms if term)

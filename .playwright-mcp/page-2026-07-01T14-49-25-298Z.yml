@@ -1,0 +1,73 @@
+- generic [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e4]:
+      - generic [ref=e217]:
+        - img "Running..." [ref=e218]
+        - generic [ref=e219]: Running...
+        - button "Stop" [ref=e221] [cursor=pointer]
+      - button "Deploy" [ref=e12] [cursor=pointer]:
+        - generic [ref=e14]: Deploy
+      - button [ref=e16] [cursor=pointer]:
+        - img [ref=e17]
+  - generic [ref=e20]:
+    - generic [ref=e30]:
+      - heading "Состояние" [level=3] [ref=e34]
+      - paragraph [ref=e38]: "API: ok"
+      - paragraph [ref=e42]: "KG backend: neo4j"
+      - paragraph [ref=e46]: "Активных документов: 18"
+      - paragraph [ref=e50]: "Активных chunks: 450"
+      - paragraph [ref=e54]: "LLM: готов"
+      - group [ref=e56]:
+        - generic "Advanced diagnostics" [ref=e57] [cursor=pointer]:
+          - paragraph [ref=e60]: Advanced diagnostics
+          - img [ref=e61]
+    - generic [ref=e68]:
+      - heading "Scientific Knowledge Graph" [level=1] [ref=e73]: Scientific Knowledge Graph
+      - paragraph [ref=e78]: Система связывает документы, эксперименты, материалы, режимы, свойства, оборудование, лаборатории, выводы и пробелы в данных.
+      - generic [ref=e80]:
+        - paragraph [ref=e83]: Режим работы
+        - radiogroup "Режим работы" [ref=e84] [cursor=pointer]:
+          - generic [ref=e85]:
+            - radio "Лучший ответ" [checked]
+            - paragraph [ref=e90]: Лучший ответ
+          - generic [ref=e91]:
+            - radio "Строгая проверка"
+            - paragraph [ref=e96]: Строгая проверка
+          - generic [ref=e97]:
+            - radio "Офлайн-режим"
+            - paragraph [ref=e102]: Офлайн-режим
+      - generic [ref=e105]:
+        - paragraph [ref=e109]:
+          - strong [ref=e110]: Расширение базы знаний
+        - generic [ref=e111]:
+          - generic [ref=e117]:
+            - paragraph [ref=e121]: Активные документы
+            - generic [ref=e123]: "18"
+          - generic [ref=e129]:
+            - paragraph [ref=e133]: Canonical facts
+            - generic [ref=e135]: "50"
+          - generic [ref=e141]:
+            - paragraph [ref=e145]: Новые связи
+            - generic [ref=e147]: "4"
+          - generic [ref=e153]:
+            - paragraph [ref=e157]: Конфликты
+            - generic [ref=e159]: "5"
+          - generic [ref=e165]:
+            - paragraph [ref=e169]: Пробелы данных
+            - generic [ref=e171]: "4"
+        - paragraph [ref=e175]: "Последнее обновление: 2026-06-30 05:54:18"
+      - group [ref=e177]:
+        - generic "Документы" [ref=e178] [cursor=pointer]:
+          - paragraph [ref=e181]: Документы
+          - img [ref=e182]
+      - group [ref=e186]:
+        - generic "Примеры вопросов" [ref=e187] [cursor=pointer]:
+          - paragraph [ref=e190]: Примеры вопросов
+          - img [ref=e191]
+      - generic [ref=e195]:
+        - paragraph [ref=e198]: Введите исследовательский вопрос
+        - textbox "Введите исследовательский вопрос" [ref=e201]:
+          - /placeholder: ""
+          - text: Сравни ВТ6 и 7075-T6 по прочности.
+      - button "Найти ответ" [active] [ref=e204] [cursor=pointer]:
+        - paragraph [ref=e206]: Найти ответ

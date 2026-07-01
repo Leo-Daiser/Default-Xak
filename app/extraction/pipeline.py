@@ -75,7 +75,7 @@ class ExtractionPipeline:
         return self._merge_raw(candidates, document.doc_id, document.title, {"document_id": document.doc_id})
 
     def _merge_and_validate(self, candidates: list[ExtractionBundle], chunk: Chunk, diagnostics: dict[str, Any]) -> ExtractionBundle:
-        merged = self._merge_raw(candidates, chunk.doc_id, str(chunk.metadata.get("filename") or chunk.doc_id), diagnostics)
+        merged = self._merge_raw(candidates, chunk.doc_id, str(chunk.metadata.get("source_name") or chunk.metadata.get("filename") or chunk.doc_id), diagnostics)
         validation = validate_items(merged.entities, merged.experiments, merged.data_gaps, min_confidence=self.min_confidence)
         accepted = ExtractionBundle(
             document_id=merged.document_id,
@@ -153,4 +153,3 @@ def _dedupe_gaps(items):
         seen.add(key)
         result.append(item)
     return result
-

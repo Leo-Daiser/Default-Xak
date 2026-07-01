@@ -144,6 +144,40 @@ def runtime_profile_summary(settings: Any) -> dict[str, Any]:
     }
 
 
+def profile_consistency_issues(
+    *,
+    runtime_profile: str | None,
+    retrieval_mode: str | None,
+    local_embeddings_enabled: bool,
+    llm_enabled: bool,
+    llm_provider: str | None,
+    effective_retrieval_mode: str | None = None,
+    hybrid_dense_enabled: bool | None = None,
+) -> list[str]:
+    """Return user-facing profile/runtime mismatch warnings."""
+
+    profile = normalize_runtime_profile(runtime_profile)
+    mode = str(retrieval_mode or "").strip().lower()
+    provider = str(llm_provider or "").strip().lower()
+    effective = str(effective_retrieval_mode or mode).strip().lower()
+    issues: list[str] = []
+    if profile == "economy_core" and (
+        local_embeddings_enabled
+        or mode == "hybrid"
+        or llm_enabled
+        or (provider and provider != "offline")
+    ):
+        issues.append("Profile economy_core is overridden by explicit env settings.")
+    if profile == "balanced_hybrid" and (
+        not local_embeddings_enabled
+        or mode != "hybrid"
+        or effective != "hybrid"
+        or hybrid_dense_enabled is False
+    ):
+        issues.append("balanced_hybrid requested but dense retrieval is disabled/degraded.")
+    return issues
+
+
 def _read_dotenv_key(path: Path, key: str) -> str | None:
     try:
         lines = path.read_text(encoding="utf-8").splitlines()

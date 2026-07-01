@@ -45,3 +45,23 @@ def test_active_document_changes_detect_checkbox_diff() -> None:
         {"doc_id": "doc2", "Активен": False},
     ]
     assert active_document_changes(original, edited) == [("doc1", False)]
+
+
+def test_document_rows_use_readable_url_source_name() -> None:
+    rows = documents_to_rows(
+        [
+            {
+                "doc_id": "doc-url",
+                "filename": "vt6-annealing.html",
+                "source_name": "VT6 annealing study",
+                "source_type": "url",
+                "chunks": 2,
+                "active": True,
+                "updated_at": "2026-01-02",
+                "parser": "html",
+            }
+        ]
+    )
+
+    assert rows[0]["Документ"] == "VT6 annealing study"
+    assert rows[0]["Тип"] == "url"

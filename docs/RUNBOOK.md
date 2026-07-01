@@ -528,6 +528,76 @@ runtime presets, несколько demo-вопросов, отсутствие 
 `doc_`, `chunk_`, `EXP-`, `SCI-` и raw graph labels в основном ответе, а также
 security sanity-check для `.env` и release package.
 
+### Knowledge expansion checks
+
+Knowledge expansion работает детерминированно: новые документы проходят parsing,
+chunking, extraction, canonical normalization, deduplication, conflict/data-gap
+detection и delta report. LLM extraction не используется.
+
+Локальный отчёт:
+
+```powershell
+python scripts/knowledge_expansion_report.py --json artifacts/knowledge_expansion_report.json
+```
+
+Controlled eval в economy-compatible режиме:
+
+```powershell
+python evaluation/eval_knowledge_expansion.py
+```
+
+Если Docker/Neo4j доступен:
+
+```powershell
+docker compose exec api python scripts/init_neo4j_schema.py
+docker compose exec api python scripts/sync_graph_to_neo4j.py
+docker compose exec api python scripts/smoke_neo4j_graph.py
+docker compose exec api python scripts/knowledge_expansion_report.py
+```
+
+Инварианты:
+
+- повторный ingest того же документа не увеличивает canonical facts;
+- изменённое содержимое того же файла получает новую версию документа;
+- inactive documents исключаются из active retrieval/graph answer path;
+- accepted facts имеют evidence;
+- conflicts и data gaps показываются в отчётах, а не скрываются;
+- `/ask` contract не меняется.
+
+### Extraction quality report
+
+Локально, без доступа к контейнерной сети Neo4j, запускайте отчёт явно без
+persisted graph scan:
+
+```powershell
+python scripts/extraction_quality_report.py --skip-neo4j
+```
+
+В Docker API-контейнере Neo4j-переменные уже передаются сервису, поэтому можно
+проверить и persisted graph records:
+
+```powershell
+docker compose exec api python scripts/extraction_quality_report.py
+```
+
+Если локальный запуск пишет `Neo4j scan skipped: Neo4j connection settings are
+not configured for this runtime.`, это не ошибка extraction layer. Это означает,
+что отчёт построен по локальному catalog/corpus, но скрипт не получил
+`NEO4J_URI`/`NEO4J_PASSWORD` для проверки записей в контейнерном Neo4j. Для
+локального scan можно передать параметры явно:
+
+```powershell
+python scripts/extraction_quality_report.py `
+  --neo4j-uri bolt://localhost:7687 `
+  --neo4j-user neo4j `
+  --neo4j-password <local-password> `
+  --neo4j-database neo4j
+```
+
+Пароль не печатается в отчёте. В JSON смотрите поля
+`neo4j_scan_status`, `neo4j_scan_warning` и
+`legacy_neo4j_records_missing_normalized_fields`.
+
 Полезные endpoints:
 
 ```powershell

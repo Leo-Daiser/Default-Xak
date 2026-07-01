@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..config import settings
+from ..domain.fact_normalization import canonical_fact_key_from_row, dedupe_fact_rows, with_normalized_measurement_fields
 from ..domain.normalization import material_matches, property_matches, regime_matches
 from ..domain.ontology import DataGap, Evidence, Measurement
 from ..graph.graph_models import DecisionHistoryItem, ExperimentFact
@@ -30,7 +31,7 @@ class GraphContextBuilder:
         partial_matches: dict[str, Any] | None = None,
     ) -> GraphContext:
         filtered = [exp for exp in experiments if self._matches_constraints(exp, plan)]
-        facts = _dedupe_dicts([row for exp in filtered for row in _fact_rows(exp)], ["experiment_id", "material", "regime", "property", "value", "unit"])
+        facts = dedupe_fact_rows([row for exp in filtered for row in _fact_rows(exp)])
         facts = [row for row in facts if self._row_matches(row, plan)][: self.max_facts]
         sources = self._sources_from_experiments(filtered)
         gap_rows = [gap.model_dump() for gap in (gaps or []) if self._gap_matches(gap, plan)][: self.max_facts]
@@ -229,21 +230,27 @@ def _fact_rows(exp: ExperimentFact) -> list[dict[str, Any]]:
     for material in exp.materials or [""]:
         for regime in exp.regimes or [""]:
             for measurement in measurements:
-                rows.append(
-                    {
-                        "experiment_id": exp.experiment_id,
-                        "material": material,
-                        "regime": regime,
-                        "property": measurement.property_name,
-                        "value": measurement.value,
-                        "raw_value": measurement.raw_value,
-                        "unit": measurement.unit,
-                        "effect": measurement.effect,
-                        "equipment": exp.equipment,
-                        "laboratories": [item for item in exp.laboratories if _is_useful_name(item)],
-                        "evidence": [item.model_dump() for item in measurement.evidence or exp.evidence],
-                    }
-                )
+                normalized = with_normalized_measurement_fields(measurement)
+                row = {
+                    "experiment_id": exp.experiment_id,
+                    "material": material,
+                    "regime": regime,
+                    "property": normalized.property_name,
+                    "value": normalized.value,
+                    "raw_value": normalized.raw_value,
+                    "unit": normalized.unit,
+                    "value_original": normalized.value_original,
+                    "unit_original": normalized.unit_original,
+                    "value_normalized": normalized.value_normalized,
+                    "unit_normalized": normalized.unit_normalized,
+                    "normalization_family": normalized.normalization_family,
+                    "effect": normalized.effect,
+                    "equipment": exp.equipment,
+                    "laboratories": [item for item in exp.laboratories if _is_useful_name(item)],
+                    "evidence": [item.model_dump() for item in normalized.evidence or exp.evidence],
+                }
+                row["canonical_fact_key"] = canonical_fact_key_from_row(row)
+                rows.append(row)
     return rows
 
 

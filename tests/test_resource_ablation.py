@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from evaluation.eval_resource_ablation import profile_environment, summarize_profile
+from evaluation.eval_resource_ablation import profile_environment, run_docker_target, summarize_profile
 
 
 def test_resource_ablation_marks_missing_llm_as_warning_not_failure() -> None:
@@ -26,3 +26,15 @@ def test_resource_ablation_profile_environment_sets_economy_core_without_externa
     assert env["ENABLE_LOCAL_EMBEDDINGS"] == "false"
     assert env["ENABLE_LLM"] == "false"
     assert env["LLM_PROVIDER"] == "offline"
+
+
+def test_resource_ablation_docker_target_handles_missing_api(monkeypatch) -> None:
+    import evaluation.eval_resource_ablation as ablation
+
+    monkeypatch.setattr(ablation, "_request_json", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("no api")))
+
+    result, exit_code = run_docker_target("http://127.0.0.1:1")
+
+    assert exit_code == 1
+    assert result["summary"] == "FAIL"
+    assert "API target is unavailable; run docker compose up first." in result["error"]

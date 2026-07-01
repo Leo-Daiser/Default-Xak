@@ -15,6 +15,14 @@
 | `balanced_hybrid` | BM25 + local dense | MiniLM, lazy | off by default | Семантический retrieval при умеренных CPU/RAM. |
 | `quality_full` | BM25 + local dense | MiniLM, lazy | guarded polish | Текущий полный demo path. Qdrant остается optional, не default. |
 
+## Presentation Summary
+
+| Mode | LLM | Embeddings | Image size | Demo regression | Use case |
+| --- | --- | --- | --- | --- | --- |
+| `economy_core` | no | no | ~0.20 GB measured locally (`economy-check`) | 7/7 | Minimal deployment and resource-efficiency proof. |
+| `balanced_hybrid` | optional guarded | MiniLM 384d | current API ~2.888 GB measured locally | 7/7 | Better semantic retrieval with moderate CPU/RAM. |
+| `quality_full` | guarded | hybrid | depends on optional dependencies | 7/7 | Maximum demo quality with guard-protected LLM polish. |
+
 ## Почему это resource-efficient
 
 - Extraction deterministic: факты извлекаются regex/pattern/table logic, не через LLM.
@@ -28,6 +36,16 @@
 - Qdrant projection не включен по умолчанию: `DIRECT_QDRANT_PROJECTION=false`.
 
 ## Как включить режимы
+
+Рекомендуемый способ переключения локального `.env`:
+
+```bash
+python scripts/switch_runtime_profile.py economy --write --backup
+python scripts/switch_runtime_profile.py balanced --write --backup
+python scripts/switch_runtime_profile.py quality --write --backup
+```
+
+Без `--write` скрипт только показывает sanitized diff и не меняет `.env`.
 
 Минимальный режим:
 
@@ -68,6 +86,7 @@ EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
 ```bash
 python scripts/resource_efficiency_report.py
 python evaluation/eval_resource_ablation.py
+python evaluation/eval_resource_ablation.py --target docker
 python evaluation/eval_demo_regression.py
 python scripts/demo_gate.py
 ```
@@ -99,6 +118,8 @@ docker compose --profile full build --no-cache api
 - `LLM disabled` нормально для `economy_core`.
 - Docker image `> RESOURCE_MAX_IMAGE_GB` дает warning по умолчанию и fail только при `RESOURCE_STRICT=true`.
 - `LLM extraction enabled` для этого проекта считается плохим ресурсным режимом; source of truth должен оставаться deterministic extraction + graph.
+- `Profile economy_core is overridden by explicit env settings` означает, что профиль выбран как economy, но конкретные env-переменные включили hybrid/embeddings/LLM. Для строгой демонстрации переключите `.env` через `scripts/switch_runtime_profile.py economy --write --backup`.
+- `balanced_hybrid requested but dense retrieval is disabled/degraded` означает, что hybrid-профиль выбран, но dense слой не поднялся или недоступна dependency/model.
 
 ## Рекомендуемый режим для демонстрации resource efficiency
 

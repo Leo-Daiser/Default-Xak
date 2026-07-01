@@ -1,0 +1,49 @@
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/analytics/graph_context.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/answering/answer_builder.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/answering/human_answer.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/domain/aliases.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/domain/ontology.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/extraction/deterministic.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/extraction/resolver.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/extraction/to_graph_models.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/extraction/validators.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/graph/graph_repository.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/graph/graph_writer.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/graph/neo4j_repository.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/ui.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/ui_helpers.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/RUNBOOK.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'scripts/smoke_neo4j_graph.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/test_comparison_answer_quality.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/test_extraction_validators.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/test_graph_writer_idempotency.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/test_human_answer_synthesis.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/test_neo4j_repository_queries.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/test_streamlit_preset_mapping.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/test_ui_payload_formatting.py', LF will be replaced by CRLF the next time Git touches it
+ .gitignore                              |   1 [32m+[m
+ app/analytics/graph_context.py          |  39 [32m+[m[31m--[m
+ app/answering/answer_builder.py         |  49 [32m++[m[31m--[m
+ app/answering/human_answer.py           | 204 [32m++++++++++++++[m[31m--[m
+ app/domain/aliases.py                   |   6 [32m+[m
+ app/domain/ontology.py                  |  13 [32m+[m[31m-[m
+ app/extraction/deterministic.py         | 160 [32m+++++++++++[m[31m-[m
+ app/extraction/resolver.py              |   1 [32m+[m
+ app/extraction/to_graph_models.py       |  32 [32m++[m[31m-[m
+ app/extraction/validators.py            |  22 [32m+[m[31m-[m
+ app/graph/graph_repository.py           |  13 [32m+[m[31m-[m
+ app/graph/graph_writer.py               |  78 [32m+++++[m[31m-[m
+ app/graph/neo4j_repository.py           |  14 [32m+[m[31m-[m
+ app/ui.py                               |  65 [32m++++[m[31m-[m
+ app/ui_helpers.py                       | 417 [32m+++++++++++++++++++++++++++++++[m[31m-[m
+ docs/RUNBOOK.md                         |  34 [32m+++[m
+ scripts/smoke_neo4j_graph.py            |  42 [32m+++[m[31m-[m
+ tests/test_comparison_answer_quality.py |  16 [32m++[m
+ tests/test_extraction_validators.py     |   1 [32m+[m
+ tests/test_graph_writer_idempotency.py  |  47 [32m++++[m
+ tests/test_human_answer_synthesis.py    |  59 [32m++++[m[31m-[m
+ tests/test_neo4j_repository_queries.py  | 115 [32m++++++++[m[31m-[m
+ tests/test_streamlit_preset_mapping.py  |  14 [32m++[m
+ tests/test_ui_payload_formatting.py     | 199 [32m++++++++++++++[m[31m-[m
+ 24 files changed, 1523 insertions(+), 118 deletions(-)

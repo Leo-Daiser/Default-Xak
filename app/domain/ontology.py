@@ -54,6 +54,11 @@ class Measurement(BaseModel):
     value: float | None = None
     raw_value: str | None = None
     unit: str | None = None
+    value_original: float | None = None
+    unit_original: str | None = None
+    value_normalized: float | None = None
+    unit_normalized: str | None = None
+    normalization_family: str | None = None
     effect: str | None = None
     baseline_value: float | None = None
     delta_abs: float | None = None
@@ -125,11 +130,15 @@ class Experiment(BaseModel):
                             "material": material,
                             "regime": regime,
                             "property": measurement.property_name,
-                            "value": measurement.raw_value,
+                            "value": measurement.value if measurement.value is not None else measurement.raw_value,
                             "unit": measurement.unit,
+                            "value_original": measurement.value_original,
+                            "unit_original": measurement.unit_original,
+                            "value_normalized": measurement.value_normalized,
+                            "unit_normalized": measurement.unit_normalized,
+                            "normalization_family": measurement.normalization_family,
                             "effect": measurement.effect,
                             "evidence": [item.model_dump() for item in measurement.evidence],
                         }
                     )
         return rows
-

@@ -13,6 +13,7 @@ UNIT_ALIASES = {
     "мПа".lower(): "MPa",
     "gpa": "GPa",
     "гпа": "GPa",
+    "ksi": "ksi",
     "hv": "HV",
     "hrc": "HRC",
     "%": "%",

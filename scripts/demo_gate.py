@@ -17,7 +17,7 @@ if str(ROOT) not in sys.path:
 
 from scripts.extraction_quality_report import Neo4jScanOptions, build_report as build_extraction_report  # noqa: E402
 from scripts.resource_efficiency_report import _docker_api_image_size_bytes  # noqa: E402
-from app.runtime.profiles import runtime_profile_from_environment  # noqa: E402
+from app.runtime.profiles import profile_consistency_issues, runtime_profile_from_environment  # noqa: E402
 
 
 RAW_LEAKAGE_RE = re.compile(
@@ -146,8 +146,21 @@ def run_resource_checks(gate: DemoGate, health: dict[str, Any]) -> None:
     answering = health.get("answering") or {}
     llm = health.get("llm") or {}
 
-    if profile == "economy_core" and retrieval.get("local_embeddings_enabled"):
-        gate.warn("economy_core has local embeddings enabled")
+    consistency_issues = profile_consistency_issues(
+        runtime_profile=profile,
+        retrieval_mode=str(retrieval.get("retrieval_mode") or ""),
+        local_embeddings_enabled=bool(retrieval.get("local_embeddings_enabled")),
+        llm_enabled=bool(llm.get("enabled")),
+        llm_provider=str(llm.get("provider") or ""),
+        effective_retrieval_mode=str(retrieval.get("effective_retrieval_mode") or ""),
+        hybrid_dense_enabled=retrieval.get("hybrid_dense_enabled") if "hybrid_dense_enabled" in retrieval else None,
+    )
+    if consistency_issues and strict:
+        for issue in consistency_issues:
+            gate.fail(issue)
+    elif consistency_issues:
+        for issue in consistency_issues:
+            gate.warn(issue)
     else:
         gate.pass_("Runtime profile/embedding settings are resource-consistent")
 

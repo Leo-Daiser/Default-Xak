@@ -5,6 +5,7 @@ from scripts.demo_gate import (
     classify_image_size,
     classify_retrieval,
     contains_raw_leakage,
+    run_resource_checks,
     validate_answer_graph,
     validate_answer_payload,
 )
@@ -78,6 +79,60 @@ def test_demo_gate_large_image_warns_unless_resource_strict() -> None:
 
     assert relaxed.level == "WARN"
     assert strict.level == "FAIL"
+
+
+def test_demo_gate_warns_on_profile_override_by_default(monkeypatch) -> None:
+    import scripts.demo_gate as demo_gate
+
+    monkeypatch.delenv("RESOURCE_STRICT", raising=False)
+    monkeypatch.setattr(demo_gate, "_docker_api_image_size_bytes", lambda: None)
+    gate = DemoGate()
+
+    run_resource_checks(
+        gate,
+        {
+            "runtime_profile": "economy_core",
+            "retrieval": {
+                "retrieval_mode": "hybrid",
+                "effective_retrieval_mode": "hybrid",
+                "local_embeddings_enabled": True,
+                "hybrid_dense_enabled": True,
+            },
+            "llm": {"enabled": True, "provider": "mistral"},
+            "extraction": {"llm_extraction_available": False},
+            "answering": {"answer_synthesis_mode": "hybrid"},
+            "qdrant_projection_enabled": False,
+        },
+    )
+
+    assert any(check.level == "WARN" and "Profile economy_core is overridden" in check.message for check in gate.checks)
+
+
+def test_demo_gate_resource_strict_fails_on_profile_override(monkeypatch) -> None:
+    import scripts.demo_gate as demo_gate
+
+    monkeypatch.setenv("RESOURCE_STRICT", "true")
+    monkeypatch.setattr(demo_gate, "_docker_api_image_size_bytes", lambda: None)
+    gate = DemoGate()
+
+    run_resource_checks(
+        gate,
+        {
+            "runtime_profile": "economy_core",
+            "retrieval": {
+                "retrieval_mode": "hybrid",
+                "effective_retrieval_mode": "hybrid",
+                "local_embeddings_enabled": True,
+                "hybrid_dense_enabled": True,
+            },
+            "llm": {"enabled": True, "provider": "mistral"},
+            "extraction": {"llm_extraction_available": False},
+            "answering": {"answer_synthesis_mode": "hybrid"},
+            "qdrant_projection_enabled": False,
+        },
+    )
+
+    assert any(check.level == "FAIL" and "Profile economy_core is overridden" in check.message for check in gate.checks)
 
 
 def test_demo_gate_validates_answer_graph_contract() -> None:

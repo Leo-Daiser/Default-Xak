@@ -1,0 +1,10 @@
+- banner [ref=e2]:
+  - generic [ref=e4]:
+    - generic [ref=e6]:
+      - img "Running..." [ref=e7]
+      - generic [ref=e8]: Running...
+      - button "Stop" [ref=e10] [cursor=pointer]
+    - button "Deploy" [ref=e12] [cursor=pointer]:
+      - generic [ref=e14]: Deploy
+    - button [ref=e16] [cursor=pointer]:
+      - img [ref=e17]

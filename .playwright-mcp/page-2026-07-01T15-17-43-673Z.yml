@@ -1,0 +1,291 @@
+- generic:
+  - generic:
+    - generic [ref=e1]:
+      - banner [ref=e2]:
+        - generic [ref=e7]:
+          - button "Deploy" [ref=e9] [cursor=pointer]:
+            - generic [ref=e11]: Deploy
+          - button [ref=e13] [cursor=pointer]:
+            - img [ref=e14]
+      - generic [ref=e4]:
+        - generic [ref=e24]:
+          - heading "Состояние" [level=3] [ref=e28]
+          - paragraph [ref=e32]: "API: ok"
+          - paragraph [ref=e36]: "KG backend: neo4j"
+          - paragraph [ref=e40]: "Активных документов: 18"
+          - paragraph [ref=e44]: "Активных chunks: 450"
+          - paragraph [ref=e48]: "LLM: готов"
+          - group [ref=e50]:
+            - generic "Advanced diagnostics" [ref=e51] [cursor=pointer]:
+              - paragraph [ref=e54]: Advanced diagnostics
+              - img [ref=e55]
+        - generic [ref=e62]:
+          - heading "Scientific Knowledge Graph" [level=1] [ref=e67]: Scientific Knowledge Graph
+          - paragraph [ref=e72]: Система связывает документы, эксперименты, материалы, режимы, свойства, оборудование, лаборатории, выводы и пробелы в данных.
+          - generic [ref=e74]:
+            - paragraph [ref=e77]: Режим работы
+            - radiogroup "Режим работы" [ref=e78] [cursor=pointer]:
+              - generic [ref=e79]:
+                - radio "Лучший ответ" [checked]
+                - paragraph [ref=e84]: Лучший ответ
+              - generic [ref=e85]:
+                - radio "Строгая проверка"
+                - paragraph [ref=e90]: Строгая проверка
+              - generic [ref=e91]:
+                - radio "Офлайн-режим"
+                - paragraph [ref=e96]: Офлайн-режим
+          - generic [ref=e99]:
+            - paragraph [ref=e103]:
+              - strong [ref=e104]: Расширение базы знаний
+            - generic [ref=e105]:
+              - generic [ref=e111]:
+                - paragraph [ref=e115]: Активные документы
+                - generic [ref=e117]: "18"
+              - generic [ref=e123]:
+                - paragraph [ref=e127]: Canonical facts
+                - generic [ref=e129]: "50"
+              - generic [ref=e135]:
+                - paragraph [ref=e139]: Новые связи
+                - generic [ref=e141]: "4"
+              - generic [ref=e147]:
+                - paragraph [ref=e151]: Конфликты
+                - generic [ref=e153]: "5"
+              - generic [ref=e159]:
+                - paragraph [ref=e163]: Пробелы данных
+                - generic [ref=e165]: "4"
+            - paragraph [ref=e169]: "Последнее обновление: 2026-06-30 05:54:18"
+          - group [ref=e171]:
+            - generic "Документы" [ref=e172] [cursor=pointer]:
+              - paragraph [ref=e175]: Документы
+              - img [ref=e176]
+          - group [ref=e180]:
+            - generic "Примеры вопросов" [ref=e181] [cursor=pointer]:
+              - paragraph [ref=e184]: Примеры вопросов
+              - img [ref=e185]
+          - generic [ref=e189]:
+            - paragraph [ref=e192]: Введите исследовательский вопрос
+            - textbox "Введите исследовательский вопрос" [ref=e195]:
+              - /placeholder: ""
+              - text: Сравни ВТ6 и 7075-T6 по прочности.
+          - button "Найти ответ" [ref=e198] [cursor=pointer]:
+            - paragraph [ref=e200]: Найти ответ
+          - generic [ref=e570]:
+            - generic [ref=e574]:
+              - heading "Ответ" [level=3] [ref=e579]: Ответ
+              - generic [ref=e583]:
+                - heading "Сравнение прочность по найденным данным" [level=3] [ref=e585]: Сравнение прочность по найденным данным
+                - paragraph [ref=e587]: Сравнение прочности сплавов ВТ6 и 7075-T6 по доступным данным ограничено, так как режимы обработки и условия испытаний различаются. Для 7075-T6 после старения указана прочность около 520 МПа. Для ВТ6 приведены значения прочности в диапазоне от 823 до 1120 МПа. Таким образом, в некоторых состояниях ВТ6 демонстрирует более высокую прочность, чем 7075-T6, но точные выводы требуют учёта конкретных условий обработки и испытаний.
+                - paragraph [ref=e588]:
+                  - strong [ref=e589]: "Что найдено:"
+                - list [ref=e590]:
+                  - listitem [ref=e591]: "7075-T6: найденный диапазон прочности после пересчёта — примерно 520 MPa; наиболее высокие значения: 520 MPa; эффекты: рост."
+                  - listitem [ref=e592]: "ВТ6: найденный диапазон прочности после пересчёта — примерно 823-1120 MPa; наиболее высокие значения: 1120 MPa, 980 MPa, 931 MPa; эффекты: рост, эффект не указан явно, снижение."
+                - paragraph [ref=e593]:
+                  - strong [ref=e594]: "Ограничения:"
+                - list [ref=e595]:
+                  - listitem [ref=e596]: "Сравнение ограничено: найденные значения относятся к разным режимам, состояниям материала или единицам измерения. Это обзор доступных фактов, а не прямое экспериментальное сравнение в одинаковых экспериментальных условиях."
+                  - listitem [ref=e597]: "В корпусе найдены разные значения прочности для ВТ6 после отжига: 1120 MPa и 980 MPa и 827 MPa. Это может быть связано с различиями в параметрах режима, источниках или исходном состоянии материала."
+                - paragraph [ref=e598]:
+                  - strong [ref=e599]: "Вывод:"
+                  - text: В найденном корпусе ВТ6 имеет более высокий верхний уровень прочность (около 1120 MPa), но это нельзя считать строгим преимуществом без одинаковых условий испытаний.
+                - paragraph [ref=e600]:
+                  - strong [ref=e601]: "Уверенность:"
+                  - text: средняя
+              - generic [ref=e602]:
+                - generic [ref=e608]:
+                  - paragraph [ref=e612]: Статус
+                  - generic [ref=e614]: Найдены подтверждённые данные
+                - generic [ref=e620]:
+                  - paragraph [ref=e624]: Факты
+                  - generic [ref=e626]: "12"
+                - generic [ref=e632]:
+                  - paragraph [ref=e636]: Источники
+                  - generic [ref=e638]: "8"
+                - generic [ref=e644]:
+                  - paragraph [ref=e648]: Evidence
+                  - generic [ref=e650]: "12"
+                - generic [ref=e656]:
+                  - paragraph [ref=e660]: Узлы графа
+                  - generic [ref=e662]: "40"
+              - paragraph [ref=e666]:
+                - strong [ref=e667]: Основание ответа
+              - list [ref=e671]:
+                - listitem [ref=e672]:
+                  - paragraph [ref=e673]:
+                    - strong [ref=e674]: "7075-T6 · старение · прочность: 520 MPa"
+                  - paragraph [ref=e675]: "Источник: Данные по термообработке 7075-T6"
+                  - paragraph [ref=e676]: "Фрагмент: \"материал: 7075-T6; режим: старение; свойство: прочность; значение: 520; единица: MPa; эффект: рост; вывод: Вывод: после старения 7075-T6 прочность измерена; коррозионная стойкость…\""
+              - list [ref=e680]:
+                - listitem [ref=e681]:
+                  - paragraph [ref=e682]:
+                    - strong [ref=e683]: "ВТ6 · отжиг · прочность: 1120 MPa"
+                  - paragraph [ref=e684]: "Источник: Материал по ВТ6"
+                  - paragraph [ref=e685]: "Фрагмент: \"experiment_id: API-NEO4J-VT6. Material: сплав ВТ6. Process: отжиг 900 C 2 h. Property: прочность. Result: прочность повышена to 1120 MPa\""
+              - list [ref=e689]:
+                - listitem [ref=e690]:
+                  - paragraph [ref=e691]:
+                    - strong [ref=e692]: "ВТ6 · отжиг · прочность: 980 MPa"
+                  - paragraph [ref=e693]: "Источник: Экспериментальные данные по ВТ6"
+                  - paragraph [ref=e694]: "Фрагмент: \"материал: ВТ6; режим: отжиг; свойство: прочность; значение: 980; единица: MPa; эффект: снижена; вывод: Вывод: отжиг ВТ6 снизил прочность, но повысил пластичность до 14 %\""
+              - list [ref=e698]:
+                - listitem [ref=e699]:
+                  - paragraph [ref=e700]:
+                    - strong [ref=e701]: "ВТ6 · отжиг · прочность: 980 MPa"
+                  - paragraph [ref=e702]: "Источник: Статья по ВТ6"
+                  - paragraph [ref=e703]: "Фрагмент: \"эксперимент: VT6-AN-TXT Material: сплав ВТ6. Process: отжиг at 750 C for 2 h. Equipment: Вакуумная печь SNOL-75. Laboratory: Лаборатория легких сплавов. Property: прочность. Resul…\""
+              - list [ref=e707]:
+                - listitem [ref=e708]:
+                  - paragraph [ref=e709]:
+                    - strong [ref=e710]: "ВТ6 · отжиг · прочность: 827 MPa"
+                  - paragraph [ref=e711]: "Источник: Материал по ВТ6"
+                  - paragraph [ref=e712]: "Фрагмент: \"| | | | | | | | | | --- | --- | --- | --- | --- | --- | --- | --- | | Material | Diameter | Tensile Strength min | | Yield Strength | | Elongation in 2\" | Reduction of Area % | | …\""
+              - paragraph [ref=e716]:
+                - strong [ref=e717]: Неоднородность данных
+              - alert [ref=e720]:
+                - paragraph [ref=e725]: "Для ВТ6 после отжига найдены разные значения прочности: 1120 MPa и 980 MPa и 827 MPa и 896 MPa. Возможная причина: источники по-разному описывают качественный эффект"
+            - generic [ref=e729]:
+              - generic [ref=e730]:
+                - heading "Интерактивный связанный граф" [level=3] [ref=e739]: Интерактивный связанный граф
+                - button "Развернуть карту" [ref=e747] [cursor=pointer]:
+                  - paragraph [ref=e749]: Развернуть карту
+              - iframe [ref=e751]:
+                - generic [ref=f3e2]:
+                  - generic [ref=f3e3]: Карта сравнения
+                  - generic [ref=f3e4]: Колесо — масштаб · фон — перемещение карты · узлы зафиксированы
+                  - img [ref=f3e5]:
+                    - generic [ref=f3e6]:
+                      - generic "7075-T6 алюминиевый сплав состояние T6" [ref=f3e9]:
+                        - generic: 7075-T6алюминиевый сплавсостояние T6
+                      - generic "520 MPa сводка измерений" [ref=f3e11]:
+                        - generic: 520 MPaсводка измерений
+                      - generic "ВТ6 титановый сплав аналог Ti-6Al-4V" [ref=f3e13]:
+                        - generic: ВТ6титановый сплаваналог Ti-6Al-4V
+                      - generic "823–1120 MPa сводка измерений" [ref=f3e15]:
+                        - generic: 823–1120 MPaсводка измерений
+                      - generic "прочность диапазон/значения MPa" [ref=f3e17]:
+                        - generic: Прочностьдиапазон/значенияMPa
+                      - generic "сравнение ограничено вывод по данным Проверьте режимы, единицы и источники." [ref=f3e19]:
+                        - generic: сравнение ограниченовывод по данным
+              - separator [ref=e755]
+              - generic [ref=e756]:
+                - generic [ref=e760]:
+                  - heading "Карта происхождения ответа" [level=3] [ref=e765]: Карта происхождения ответа
+                  - paragraph [ref=e770]: Показывает, какие сущности, факты и источники сформировали ответ. Дубли объединены, технические идентификаторы доступны в аудите.
+                - button "Развернуть карту происхождения" [ref=e777] [cursor=pointer]:
+                  - paragraph [ref=e779]: Развернуть карту происхождения
+              - generic [ref=e780]:
+                - generic [ref=e787] [cursor=pointer]:
+                  - checkbox "Источники/evidence" [checked]
+                  - paragraph [ref=e792]: Источники/evidence
+                - generic [ref=e799] [cursor=pointer]:
+                  - checkbox "Пробелы данных" [checked]
+                  - paragraph [ref=e804]: Пробелы данных
+                - generic [ref=e811] [cursor=pointer]:
+                  - checkbox "Конфликты" [checked]
+                  - paragraph [ref=e816]: Конфликты
+                - generic [ref=e823] [cursor=pointer]:
+                  - checkbox "Измерения" [checked]
+                  - paragraph [ref=e828]: Измерения
+                - generic [ref=e835] [cursor=pointer]:
+                  - checkbox "Только активные" [checked]
+                  - paragraph [ref=e840]: Только активные
+              - iframe [ref=e842]:
+                - generic [ref=f4e2]:
+                  - generic [ref=f4e3]: Колесо — масштаб · фон — перемещение карты · узлы зафиксированы
+                  - img [ref=f4e4]:
+                    - generic [ref=f4e5]:
+                      - generic "Сравни ВТ6 и 7075-T6 по прочности" [ref=f4e24]:
+                        - generic: "Вопрос: сравнение7075-T6 · ВТ6 ·старение · прочность"
+                      - 'generic "Фокус ответа: извлеченные ограничения и найденные сущности" [ref=f4e26]':
+                        - generic: Фокус ответа7075-T6 · ВТ6 ·прочность
+                      - 'generic "Тип: материал; 7075-T6" [ref=f4e28]':
+                        - generic: 7075-T6алюминиевый сплавсостояние T6
+                      - 'generic "Тип: материал; ВТ6; aliases: Ti-6Al-4V, VT6" [ref=f4e30]':
+                        - generic: ВТ6титановый сплав
+                      - 'generic "Свойство: прочность" [ref=f4e32]':
+                        - generic: ПрочностьMPa
+                      - 'generic "Режим: старение" [ref=f4e34]':
+                        - generic: Старениетермообработка
+                      - 'generic "Режим: отжиг" [ref=f4e36]':
+                        - generic: Отжигтермообработка
+                      - 'generic "Материал: 7075-T6; Режим: старение; Свойство: прочность; Ключ: 7075-t6|старение|прочность|520|mpa|increase; Источники: Данные по термообработке ВТ6" [ref=f4e38]':
+                        - generic: Прочность520 MPaрост · 1 источника
+                      - 'generic "Материал: ВТ6; Режим: отжиг; Свойство: прочность; Ключ: aggregate:ВТ6|прочность|MPa; Источники: Источник из корпуса, Данные по термообработке ВТ6, Данные экспериментов, Статья по ВТ6, Материал по Ti-6Al-4V" [ref=f4e40]':
+                        - generic: Прочность ВТ6823–1120 MPa11 фактов
+                      - 'generic "Источники: Данные по термообработке ВТ6, Источник из корпуса, Данные экспериментов, Статья по ВТ6, Материал по Ti-6Al-4V, Материал по 7075-T6; Фрагменты: Table: Table columns: Эксперимент_id | material | process_regime | temperature_… | Эксперимент_id: API-NEO4J-VT6. Материал: сплав ВТ6. Режим: отжиг 900 C 2 h. Pro… | Table: Table columns: Эксперимент_id | material | process_regime | temperature_…" [ref=f4e42]':
+                        - generic: Источники19 подтверждений
+                      - generic "ВТ6; отжиг; прочность; 1120 MPa ↔ 980 MPa ↔ 827 MPa ↔ 896 MPa" [ref=f4e44]:
+                        - generic: Неоднородность1120 MPa ↔ 980 MPa ↔827 MPa ↔ …
+                      - 'generic "7075-T6; старение; прочность; Data gap: нет данных по коррозионной стойкости 7075-T6 после старения." [ref=f4e46]':
+                        - generic: ПробелПрочность
+                      - generic "Итоговый статус ответа" [ref=f4e48]:
+                        - generic: Выводусловия неоднородны
+              - paragraph [ref=e846]: Показаны ключевые связи ответа. Полные raw-данные доступны в аудите.
+              - group [ref=e848]:
+                - generic "Аудит графа" [ref=e849] [cursor=pointer]:
+                  - paragraph [ref=e852]: Аудит графа
+                  - img [ref=e853]
+          - group [ref=e857]:
+            - generic "Основание фактов" [ref=e858] [cursor=pointer]:
+              - paragraph [ref=e861]: Основание фактов
+              - img [ref=e862]
+          - group [ref=e508]:
+            - generic "Проверенные факты" [ref=e865] [cursor=pointer]:
+              - paragraph [ref=e512]: Проверенные факты
+              - img [ref=e513]
+          - group [ref=e517]:
+            - generic "Источники и evidence" [ref=e866] [cursor=pointer]:
+              - paragraph [ref=e521]: Источники и evidence
+              - img [ref=e522]
+          - group [ref=e526]:
+            - generic "История решений" [ref=e867] [cursor=pointer]:
+              - paragraph [ref=e530]: История решений
+              - img [ref=e531]
+          - group [ref=e535]:
+            - generic "Пробелы в данных" [ref=e868] [cursor=pointer]:
+              - paragraph [ref=e539]: Пробелы в данных
+              - img [ref=e540]
+          - group [ref=e544]:
+            - generic "Частичные совпадения" [ref=e869] [cursor=pointer]:
+              - paragraph [ref=e548]: Частичные совпадения
+              - img [ref=e549]
+          - group [ref=e553]:
+            - generic "Диагностика" [ref=e870] [cursor=pointer]:
+              - paragraph [ref=e557]: Диагностика
+              - img [ref=e558]
+    - dialog "dialog" [ref=e902]:
+      - generic [ref=e903]: Карта происхождения ответа
+      - generic [ref=e911]:
+        - button "×" [active] [ref=e924] [cursor=pointer]:
+          - paragraph [ref=e926]: ×
+        - iframe [ref=e928]:
+          - generic [ref=f6e2]:
+            - generic [ref=f6e3]: Колесо — масштаб · фон — перемещение карты · узлы зафиксированы
+            - img [ref=f6e4]:
+              - generic [ref=f6e5]:
+                - generic "Сравни ВТ6 и 7075-T6 по прочности" [ref=f6e24]:
+                  - generic: "Вопрос: сравнение7075-T6 · ВТ6 ·старение · прочность"
+                - 'generic "Фокус ответа: извлеченные ограничения и найденные сущности" [ref=f6e26]':
+                  - generic: Фокус ответа7075-T6 · ВТ6 ·прочность
+                - 'generic "Тип: материал; 7075-T6" [ref=f6e28]':
+                  - generic: 7075-T6алюминиевый сплавсостояние T6
+                - 'generic "Тип: материал; ВТ6; aliases: Ti-6Al-4V, VT6" [ref=f6e30]':
+                  - generic: ВТ6титановый сплав
+                - 'generic "Свойство: прочность" [ref=f6e32]':
+                  - generic: ПрочностьMPa
+                - 'generic "Режим: старение" [ref=f6e34]':
+                  - generic: Старениетермообработка
+                - 'generic "Режим: отжиг" [ref=f6e36]':
+                  - generic: Отжигтермообработка
+                - 'generic "Материал: 7075-T6; Режим: старение; Свойство: прочность; Ключ: 7075-t6|старение|прочность|520|mpa|increase; Источники: Данные по термообработке ВТ6" [ref=f6e38]':
+                  - generic: Прочность520 MPaрост · 1 источника
+                - 'generic "Материал: ВТ6; Режим: отжиг; Свойство: прочность; Ключ: aggregate:ВТ6|прочность|MPa; Источники: Источник из корпуса, Данные по термообработке ВТ6, Данные экспериментов, Статья по ВТ6, Материал по Ti-6Al-4V" [ref=f6e40]':
+                  - generic: Прочность ВТ6823–1120 MPa11 фактов
+                - 'generic "Источники: Данные по термообработке ВТ6, Источник из корпуса, Данные экспериментов, Статья по ВТ6, Материал по Ti-6Al-4V, Материал по 7075-T6; Фрагменты: Table: Table columns: Эксперимент_id | material | process_regime | temperature_… | Эксперимент_id: API-NEO4J-VT6. Материал: сплав ВТ6. Режим: отжиг 900 C 2 h. Pro… | Table: Table columns: Эксперимент_id | material | process_regime | temperature_…" [ref=f6e42]':
+                  - generic: Источники19 подтверждений
+                - generic "ВТ6; отжиг; прочность; 1120 MPa ↔ 980 MPa ↔ 827 MPa ↔ 896 MPa" [ref=f6e44]:
+                  - generic: Неоднородность1120 MPa ↔ 980 MPa ↔827 MPa ↔ …
+                - 'generic "7075-T6; старение; прочность; Data gap: нет данных по коррозионной стойкости 7075-T6 после старения." [ref=f6e46]':
+                  - generic: ПробелПрочность
+                - generic "Итоговый статус ответа" [ref=f6e48]:
+                  - generic: Выводусловия неоднородны

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ..domain.fact_normalization import measurement_normalization_fields
 from ..domain.ontology import DataGap, Evidence, Measurement
 from ..graph.graph_models import ExperimentFact
 from .models import EvidenceSpan, ExtractionBundle
@@ -17,18 +18,7 @@ def bundle_to_experiment_facts(bundle: ExtractionBundle) -> list[ExperimentFact]
                 materials=[item.canonical_name for item in experiment.materials],
                 regimes=[item.canonical_name for item in experiment.regimes],
                 measurements=[
-                    Measurement(
-                        property_name=measurement.property_canonical,
-                        value=measurement.value,
-                        raw_value=None if measurement.value is not None else "",
-                        unit=measurement.unit,
-                        effect=measurement.effect,
-                        baseline_value=measurement.baseline_value,
-                        delta_abs=measurement.delta_abs,
-                        delta_rel_percent=measurement.delta_rel_percent,
-                        confidence=measurement.confidence,
-                        evidence=[_to_evidence(item) for item in measurement.evidence],
-                    )
+                    _to_measurement(measurement)
                     for measurement in experiment.measurements
                 ],
                 equipment=[item.canonical_name for item in experiment.equipment],
@@ -41,6 +31,23 @@ def bundle_to_experiment_facts(bundle: ExtractionBundle) -> list[ExperimentFact]
             )
         )
     return facts
+
+
+def _to_measurement(measurement) -> Measurement:
+    normalized = measurement_normalization_fields(measurement.property_canonical, measurement.value, measurement.unit)
+    return Measurement(
+        property_name=measurement.property_canonical,
+        value=measurement.value,
+        raw_value=None if measurement.value is not None else "",
+        unit=measurement.unit,
+        effect=measurement.effect,
+        baseline_value=measurement.baseline_value,
+        delta_abs=measurement.delta_abs,
+        delta_rel_percent=measurement.delta_rel_percent,
+        confidence=measurement.confidence,
+        evidence=[_to_evidence(item) for item in measurement.evidence],
+        **normalized,
+    )
 
 
 def bundle_to_data_gaps(bundle: ExtractionBundle) -> list[DataGap]:
@@ -67,4 +74,3 @@ def _to_evidence(span: EvidenceSpan) -> Evidence:
         quote=span.quote,
         confidence=span.confidence,
     )
-

@@ -7,6 +7,7 @@ import re
 from typing import Any
 
 from ..models.schemas import Chunk
+from ..domain.fact_normalization import canonical_fact_key
 from .confidence import experiment_confidence
 from .extraction import EntityRelationExtractor
 from .models import (
@@ -34,7 +35,7 @@ class DeterministicExtractor:
         chunks = self._split_experiment_segments(chunk)
         bundle = ExtractionBundle(
             document_id=chunk.doc_id,
-            source_name=str(chunk.metadata.get("filename") or chunk.doc_id),
+            source_name=str(chunk.metadata.get("source_name") or chunk.metadata.get("filename") or chunk.doc_id),
             extractor_version=self.extractor_version,
             diagnostics={"segments": len(chunks), "ambiguous_multiple_experiment_ids": len(chunks) > 1},
         )
@@ -137,7 +138,7 @@ class DeterministicExtractor:
 
         return ExtractionBundle(
             document_id=chunk.doc_id,
-            source_name=str(chunk.metadata.get("filename") or chunk.doc_id),
+            source_name=str(chunk.metadata.get("source_name") or chunk.metadata.get("filename") or chunk.doc_id),
             extractor_version=self.extractor_version,
             entities=_dedupe_entities(entities),
             experiments=_dedupe_experiments(experiments),
@@ -180,7 +181,19 @@ _EXPERIMENT_ID_RE = re.compile(r"\b(?:E\d+|EXP-[A-ZА-Я0-9_.-]+)\b", re.IGNOREC
 _PERSON_RE = re.compile(r"\b[А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.\s*[А-ЯЁ]\.")
 _LAB_RE = re.compile(r"\b(?:в\s+)?(лаборатори[ия]\s+[^;,.]+)", re.IGNORECASE)
 _MATERIAL_CANDIDATES = ["ВТ6", "VT6", "Ti-6Al-4V", "7075-T6", "7075", "12Х18Н10Т", "09Г2С"]
-_REGIME_CANDIDATES = ["отжиг", "старение", "закалка", "криообработка", "annealing", "aging", "quenching"]
+_REGIME_CANDIDATES = [
+    "отжиг",
+    "старение",
+    "закалка",
+    "криообработка",
+    "термообработка",
+    "annealing",
+    "annealed",
+    "aging",
+    "aged",
+    "quenching",
+    "heat treatment",
+]
 
 
 def _extract_direct_text_patterns(chunk: Chunk, evidence: EvidenceSpan) -> ExtractionBundle:
@@ -211,6 +224,7 @@ def _extract_direct_text_patterns(chunk: Chunk, evidence: EvidenceSpan) -> Extra
         )
 
     experiment_id = _extract_experiment_id(text, chunk)
+    measurements = _apply_binding_guard(text, materials, regimes, measurements)
     experiment = ExtractedExperiment(
         experiment_id=experiment_id,
         materials=_dedupe_entities(materials),
@@ -219,8 +233,10 @@ def _extract_direct_text_patterns(chunk: Chunk, evidence: EvidenceSpan) -> Extra
         laboratories=_dedupe_entities(laboratories),
         employees=_dedupe_entities(employees),
         evidence=[evidence],
-        confidence=0.86,
+        confidence=0.0,
     )
+    confidence = experiment_confidence(experiment)
+    experiment = experiment.model_copy(update={"confidence": confidence}) if hasattr(experiment, "model_copy") else experiment.copy(update={"confidence": confidence})
     return ExtractionBundle(
         document_id=evidence.source.document_id,
         source_name=evidence.source.source_name,
@@ -276,7 +292,7 @@ def _extract_measurements(text: str, evidence: EvidenceSpan) -> list[ExtractedMe
     strength_pattern = re.compile(
         r"(?:предел\s+прочности\s*(?:σв|sigma_b)?|прочност[ьи])"
         r"[^.;,\n]{0,80}?(увелич\w+\s+до\s+|составил\w*\s+|=|:)?"
-        r"(\d+(?:[,.]\d+)?)\s*(МПа|MPa|мПа|ГПа|GPa)",
+        r"(\d+(?:[,.]\d+)?)\s*(МПа|MPa|мПа|ГПа|GPa|ksi)",
         re.IGNORECASE,
     )
     for match in strength_pattern.finditer(text):
@@ -289,6 +305,43 @@ def _extract_measurements(text: str, evidence: EvidenceSpan) -> list[ExtractedMe
                 unit=resolve_unit(match.group(3)),
                 effect="increase" if "увелич" in window else "unknown",
                 confidence=0.88,
+                evidence=[evidence],
+            )
+        )
+
+    english_strength_pattern = re.compile(
+        r"(?:ultimate\s+tensile\s+strength|tensile\s+strength|strength)"
+        r"[^.;,\n]{0,80}?(?:of\s+|=|:|reached\s+|was\s+|is\s+)?"
+        r"(\d+(?:[,.]\d+)?)\s*(ksi|MPa|GPa)",
+        re.IGNORECASE,
+    )
+    for match in english_strength_pattern.finditer(text):
+        measurements.append(
+            ExtractedMeasurement(
+                property_raw="tensile strength",
+                property_canonical=resolve_property("tensile strength"),
+                value=_float_or_none(match.group(1)),
+                unit=resolve_unit(match.group(2)),
+                effect=_normalize_effect(_qualitative_effect_near(text, match.start(), match.end())),
+                confidence=0.9,
+                evidence=[evidence],
+            )
+        )
+
+    corrosion_effect_pattern = re.compile(
+        r"(коррозионн\w+\s+стойк\w+|corrosion\s+resistance)[^.;\n]{0,80}?"
+        r"(повыс\w+|увелич\w+|increase\w*|сниз\w+|уменьш\w+|decrease\w*)",
+        re.IGNORECASE,
+    )
+    for match in corrosion_effect_pattern.finditer(text):
+        measurements.append(
+            ExtractedMeasurement(
+                property_raw=match.group(1),
+                property_canonical=resolve_property(match.group(1)),
+                value=None,
+                unit=None,
+                effect=_normalize_effect(match.group(2)),
+                confidence=0.72,
                 evidence=[evidence],
             )
         )
@@ -330,6 +383,15 @@ def _extract_gap_patterns(text: str, evidence: EvidenceSpan) -> list[ExtractedDa
     gaps: list[ExtractedDataGap] = []
     if re.search(r"коррозионн\w+\s+стойк\w+[^.;\n]{0,40}не\s+измер", text, flags=re.IGNORECASE):
         gaps.append(_gap_from_text("коррозионная стойкость не измерялась", "коррозионная стойкость", evidence))
+    if re.search(r"(?:необходим\w+|нужн\w+|требу\w+)[^.;\n]{0,80}дополнительн\w+\s+данн\w+[^.;\n]{0,60}коррозионн\w+\s+стойк", text, flags=re.IGNORECASE):
+        gaps.append(_gap_from_text("нужны дополнительные данные по коррозионной стойкости", "коррозионная стойкость", evidence))
+    if re.search(
+        r"(corrosion\s+resistance|corrosion\s+data)[^.;\n]{0,90}?"
+        r"(no\s+(?:numerical|numeric)?\s*corrosion\s+data|no\s+(?:numerical|numeric)\s+data|not\s+reported|were\s+not\s+reported)",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        gaps.append(_gap_from_text("no numerical corrosion data were reported", "corrosion resistance", evidence))
     return gaps
 
 
@@ -354,7 +416,7 @@ def _source_from_chunk(chunk: Chunk, column_name: str | None = None) -> Extracti
     return ExtractionSource(
         document_id=chunk.doc_id,
         chunk_id=chunk.chunk_id,
-        source_name=str(chunk.metadata.get("filename") or chunk.doc_id),
+        source_name=str(chunk.metadata.get("source_name") or chunk.metadata.get("filename") or chunk.doc_id),
         page=chunk.page_start,
         section_path=chunk.section_path,
         block_type=str(chunk.metadata.get("chunk_kind") or "text"),
@@ -401,9 +463,9 @@ def _evidence_from_relation(rel, default: EvidenceSpan) -> EvidenceSpan:
 def _gap_from_text(text: str, missing_for: str | None, evidence: EvidenceSpan) -> ExtractedDataGap:
     joined = f"{text} {missing_for or ''} {evidence.quote or ''}"
     material = _first_canonical(joined, resolve_material, ["ВТ6", "7075-T6", "12Х18Н10Т", "09Г2С"])
-    regime = _first_canonical(joined, resolve_regime, ["отжиг", "старение", "закалка", "криообработка"])
+    regime = _first_canonical(joined, resolve_regime, ["отжиг", "старение", "закалка", "криообработка", "термообработка", "heat treatment"])
     property_name = None
-    if re.search(r"коррозионн\w+\s+стойк", str(text or ""), flags=re.IGNORECASE):
+    if re.search(r"коррозионн\w+\s+стойк|corrosion\s+resistance|corrosion\s+data", str(joined or ""), flags=re.IGNORECASE):
         property_name = "коррозионная стойкость"
     property_name = property_name or _first_canonical(missing_for or "", resolve_property, ["коррозионная стойкость", "прочность", "твёрдость", "пластичность", "вязкость"])
     property_name = property_name or _first_canonical(joined, resolve_property, ["коррозионная стойкость", "прочность", "твёрдость", "пластичность", "вязкость"])
@@ -452,6 +514,12 @@ def _normalize_effect(value: str | None) -> str:
     return "unknown"
 
 
+def _qualitative_effect_near(text: str, start: int, end: int) -> str | None:
+    window = text[max(0, start - 80): min(len(text), end + 80)]
+    match = re.search(r"повыс\w+|увелич\w+|increase\w*|сниз\w+|уменьш\w+|decrease\w*|без\s+измен\w+|unchanged|no\s+change", window, re.IGNORECASE)
+    return match.group(0) if match else None
+
+
 def _dedupe_entities(items: list[ExtractedEntity]) -> list[ExtractedEntity]:
     seen = set()
     result = []
@@ -477,15 +545,98 @@ def _dedupe_regimes(items: list[ExtractedRegime]) -> list[ExtractedRegime]:
 
 
 def _dedupe_measurements(items: list[ExtractedMeasurement]) -> list[ExtractedMeasurement]:
-    seen = set()
-    result = []
+    by_key: dict[str, ExtractedMeasurement] = {}
     for item in items:
-        key = (item.property_canonical, item.value, item.unit, item.effect)
-        if key in seen:
+        key = canonical_fact_key(property_name=item.property_canonical, value=item.value, unit=item.unit, effect=item.effect)
+        existing = by_key.get(key)
+        if existing is None:
+            by_key[key] = item
             continue
-        seen.add(key)
-        result.append(item)
+        evidence = _dedupe_evidence([*existing.evidence, *item.evidence])
+        confidence = max(existing.confidence, item.confidence)
+        by_key[key] = existing.model_copy(update={"evidence": evidence, "confidence": confidence}) if hasattr(existing, "model_copy") else existing.copy(update={"evidence": evidence, "confidence": confidence})
+    return list(by_key.values())
+
+
+def _apply_binding_guard(
+    text: str,
+    materials: list[ExtractedEntity],
+    regimes: list[ExtractedRegime],
+    measurements: list[ExtractedMeasurement],
+) -> list[ExtractedMeasurement]:
+    if not measurements or not materials:
+        return measurements
+    sentences = _sentence_spans(text)
+    if not sentences:
+        return measurements
+    material_sentences = _entity_sentence_indexes(sentences, [item.raw_name for item in materials] + [item.canonical_name for item in materials])
+    regime_sentences = _entity_sentence_indexes(sentences, [item.raw_name for item in regimes] + [item.canonical_name for item in regimes])
+    guarded: list[ExtractedMeasurement] = []
+    for measurement in measurements:
+        measurement_sentences = _measurement_sentence_indexes(sentences, measurement)
+        if not measurement_sentences:
+            guarded.append(_copy_measurement_confidence(measurement, measurement.confidence - 0.25))
+            continue
+        penalty = 0.0
+        if material_sentences and material_sentences.isdisjoint(measurement_sentences):
+            penalty += 0.25
+        if regime_sentences and regime_sentences.isdisjoint(measurement_sentences) and not _has_cross_sentence_link(text):
+            penalty += 0.15
+        if _has_weak_binding_marker(text) and (material_sentences.isdisjoint(measurement_sentences) or regime_sentences.isdisjoint(measurement_sentences)):
+            penalty += 0.20
+        guarded.append(_copy_measurement_confidence(measurement, measurement.confidence - penalty))
+    return guarded
+
+
+def _sentence_spans(text: str) -> list[tuple[int, int, str]]:
+    result: list[tuple[int, int, str]] = []
+    start = 0
+    for match in re.finditer(r"[.!?;\n]+", text):
+        end = match.start()
+        sentence = text[start:end].strip()
+        if sentence:
+            result.append((start, end, sentence.lower().replace("ё", "е")))
+        start = match.end()
+    tail = text[start:].strip()
+    if tail:
+        result.append((start, len(text), tail.lower().replace("ё", "е")))
     return result
+
+
+def _entity_sentence_indexes(sentences: list[tuple[int, int, str]], values: list[str]) -> set[int]:
+    normalized = [str(value or "").lower().replace("ё", "е") for value in values if value]
+    return {idx for idx, (_, _, sentence) in enumerate(sentences) if any(value and value in sentence for value in normalized)}
+
+
+def _measurement_sentence_indexes(sentences: list[tuple[int, int, str]], measurement: ExtractedMeasurement) -> set[int]:
+    terms = [measurement.property_raw, measurement.property_canonical]
+    if measurement.property_canonical == "прочность":
+        terms.extend(["прочност", "tensile strength", "ultimate tensile strength", "strength"])
+    if measurement.property_canonical == "коррозионная стойкость":
+        terms.extend(["коррозион", "corrosion resistance"])
+    value = "" if measurement.value is None else f"{measurement.value:g}".lower()
+    result: set[int] = set()
+    for idx, (_, _, sentence) in enumerate(sentences):
+        has_property = any(str(term or "").lower().replace("ё", "е") in sentence for term in terms if term)
+        has_value = not value or value in sentence
+        if has_property and has_value:
+            result.add(idx)
+    return result
+
+
+def _has_cross_sentence_link(text: str) -> bool:
+    lowered = text.lower().replace("ё", "е")
+    return any(marker in lowered for marker in ["после этого", "после обработки", "after this", "after treatment", "resulting in"])
+
+
+def _has_weak_binding_marker(text: str) -> bool:
+    lowered = text.lower().replace("ё", "е")
+    return any(marker in lowered for marker in ["без связи", "другой таблиц", "unrelated", "without relation"])
+
+
+def _copy_measurement_confidence(measurement: ExtractedMeasurement, confidence: float) -> ExtractedMeasurement:
+    value = max(0.0, min(1.0, confidence))
+    return measurement.model_copy(update={"confidence": value}) if hasattr(measurement, "model_copy") else measurement.copy(update={"confidence": value})
 
 
 def _dedupe_evidence(items: list[EvidenceSpan]) -> list[EvidenceSpan]:

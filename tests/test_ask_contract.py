@@ -89,6 +89,8 @@ def test_bare_pump_query_returns_object_overview_not_fake_experiment(tmp_path: P
 def test_url_ingestion_with_mocked_html(tmp_path: Path, monkeypatch) -> None:
     api = _reset_api(tmp_path)
     client = TestClient(api.app)
+    import app.security.url_safety as url_safety
+    monkeypatch.setattr(url_safety, "_resolve_host", lambda host, port: {url_safety.ipaddress.ip_address("93.184.216.34")})
 
     class FakeResponse:
         content = b'<html><body><h1>Valve</h1><p>Valve DN50 PN16 ISO 5208</p></body></html>'
@@ -98,7 +100,7 @@ def test_url_ingestion_with_mocked_html(tmp_path: Path, monkeypatch) -> None:
             return None
 
     monkeypatch.setattr(api.requests, "get", lambda *args, **kwargs: FakeResponse())
-    response = client.post("/ingest/url", params={"url": "http://example.local/valve.html"})
+    response = client.post("/ingest/url", params={"url": "https://example.org/valve.html"})
     assert response.status_code == 200, response.text
     ask = client.post("/ask", params={"question": "Какие параметры указаны для valve DN50?", "top_k": 3})
     assert ask.status_code == 200

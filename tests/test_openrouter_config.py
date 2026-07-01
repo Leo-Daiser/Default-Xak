@@ -64,6 +64,7 @@ def test_openrouter_detected_from_llm_api_key_and_model(monkeypatch) -> None:
 
 
 def test_openrouter_placeholder_model_is_not_ready(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "openrouter")
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
     monkeypatch.setenv("OPENROUTER_MODEL", "replace-with-openrouter-model-slug")
     client = StructuredLLM()

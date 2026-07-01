@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.runtime.profiles import (
     MINILM_MULTILINGUAL_MODEL,
     normalize_runtime_profile,
+    profile_consistency_issues,
     profile_defaults,
 )
 
@@ -31,3 +32,31 @@ def test_balanced_hybrid_enables_lazy_minilm_embeddings_without_qdrant() -> None
 
 def test_unknown_runtime_profile_falls_back_to_economy_core() -> None:
     assert normalize_runtime_profile("unknown-heavy-profile") == "economy_core"
+
+
+def test_profile_consistency_detects_economy_overrides() -> None:
+    issues = profile_consistency_issues(
+        runtime_profile="economy_core",
+        retrieval_mode="hybrid",
+        local_embeddings_enabled=True,
+        llm_enabled=True,
+        llm_provider="mistral",
+        effective_retrieval_mode="hybrid",
+        hybrid_dense_enabled=True,
+    )
+
+    assert issues == ["Profile economy_core is overridden by explicit env settings."]
+
+
+def test_profile_consistency_detects_balanced_degradation() -> None:
+    issues = profile_consistency_issues(
+        runtime_profile="balanced_hybrid",
+        retrieval_mode="hybrid",
+        local_embeddings_enabled=True,
+        llm_enabled=False,
+        llm_provider="offline",
+        effective_retrieval_mode="hybrid_degraded_to_bm25",
+        hybrid_dense_enabled=False,
+    )
+
+    assert issues == ["balanced_hybrid requested but dense retrieval is disabled/degraded."]
